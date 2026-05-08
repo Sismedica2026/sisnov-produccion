@@ -72,3 +72,16 @@ INITIAL_USERS_PASSWORD=SisnovAdmin2026#Seguro
 ADMIN_PASSWORD=SisnovAdmin2026#Seguro
 SEED_DEMO_DATA=false
 ```
+
+## Recuperación controlada de acceso inicial
+
+Si los usuarios iniciales fueron creados con una contraseña incorrecta o desconocida, se puede activar temporalmente:
+
+```env
+INITIAL_USERS_PASSWORD=SisnovAdmin2026#Seguro
+RESET_INITIAL_USERS_PASSWORD=true
+```
+
+Después del deploy exitoso y de confirmar acceso con `admin1`, cambiar `RESET_INITIAL_USERS_PASSWORD` nuevamente a `false` y desplegar otra vez.
+
+No se debe dejar `RESET_INITIAL_USERS_PASSWORD=true` de forma permanente, porque cada reinicio volvería a asignar la misma contraseña inicial a todos los usuarios bootstrap.

@@ -279,8 +279,13 @@ const INITIAL_ASSIGNMENTS = [
   ['sup20', 'UNION DEL SUR']
 ];
 
+function envFlagEnabled(value) {
+  return ['true', '1', 'yes', 'si', 'sí'].includes(String(value || '').trim().toLowerCase());
+}
+
 async function bootstrapInitialUsers() {
   const password = process.env.INITIAL_USERS_PASSWORD || process.env.ADMIN_PASSWORD;
+  const resetInitialUsers = envFlagEnabled(process.env.RESET_INITIAL_USERS_PASSWORD);
 
   if (!password || !strongPassword(password)) {
     throw new Error(`INITIAL_USERS_PASSWORD o ADMIN_PASSWORD es obligatorio para crear usuarios iniciales y debe tener mínimo ${MIN_PASSWORD_LENGTH} caracteres con 3 tipos de caracteres.`);
@@ -288,6 +293,7 @@ async function bootstrapInitialUsers() {
 
   const hash = await bcrypt.hash(password, 12);
   let created = 0;
+  let updated = 0;
 
   for (const user of INITIAL_USERS) {
     const result = await pool.query(
@@ -298,6 +304,16 @@ async function bootstrapInitialUsers() {
       [user.username, hash, user.nombre, user.rol, user.zona]
     );
     if (result.rowCount > 0) created += 1;
+
+    if (resetInitialUsers && result.rowCount === 0) {
+      const updateResult = await pool.query(
+        `UPDATE usuarios
+         SET password_hash = $2, nombre = $3, rol = $4, zona = $5, activo = true
+         WHERE username = $1`,
+        [user.username, hash, user.nombre, user.rol, user.zona]
+      );
+      updated += updateResult.rowCount;
+    }
   }
 
   for (const [username, concesion] of INITIAL_ASSIGNMENTS) {
@@ -310,7 +326,8 @@ async function bootstrapInitialUsers() {
   }
 
   const total = await pool.query('SELECT COUNT(*)::int AS total FROM usuarios');
-  console.log(`✅ Bootstrap de usuarios listo. Usuarios creados ahora: ${created}. Total usuarios: ${total.rows[0].total}.`);
+  const resetMsg = resetInitialUsers ? ` Usuarios existentes actualizados: ${updated}.` : '';
+  console.log(`✅ Bootstrap de usuarios listo. Usuarios creados ahora: ${created}.${resetMsg} Total usuarios: ${total.rows[0].total}.`);
 }
 
 async function initDB() {
