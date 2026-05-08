@@ -1,6 +1,7 @@
 // ============================================================
 // SEGUIMIENTO NOVEDADES OPERATIVAS - Sismedica SAS
 // Cliente JavaScript — conecta con API backend
+// CSP legacy event compatibility: server permits script-src-attr for existing HTML handlers
 // ============================================================
 
 // ── CONSTANTS ─────────────────────────────────────────────
