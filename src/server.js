@@ -93,16 +93,26 @@ app.use(cors({
 
 app.use(express.json({ limit: '200kb' }));
 app.use(cookieParser());
+// En producción evitamos que el navegador conserve versiones antiguas del login.
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path.endsWith('.html') || req.path.endsWith('.js')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, '../public'), {
   extensions: ['html'],
-  maxAge: isProduction ? '1h' : 0,
-  etag: true
+  maxAge: 0,
+  etag: false
 }));
 
 // Rate limiting — protección contra abuso y fuerza bruta
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: Number(process.env.LOGIN_RATE_LIMIT_MAX || 30),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiados intentos. Espere 15 minutos.' }
@@ -305,15 +315,42 @@ async function bootstrapInitialUsers() {
     );
     if (result.rowCount > 0) created += 1;
 
+    // Recuperación segura: si RESET_INITIAL_USERS_PASSWORD=true, actualiza contraseña
+    // de TODOS los usuarios iniciales existentes sin borrar registros ni novedades.
     if (resetInitialUsers && result.rowCount === 0) {
       const updateResult = await pool.query(
         `UPDATE usuarios
-         SET password_hash = $2, nombre = $3, rol = $4, zona = $5, activo = true
-         WHERE username = $1`,
+         SET password_hash = $2,
+             nombre = $3,
+             rol = $4,
+             zona = $5,
+             activo = true,
+             actualizado_en = NOW()
+         WHERE LOWER(TRIM(username)) = LOWER(TRIM($1))`,
         [user.username, hash, user.nombre, user.rol, user.zona]
       );
       updated += updateResult.rowCount;
     }
+  }
+
+  // Garantía adicional para recuperación de acceso: admin1 y admin2 siempre quedan
+  // activos y con la contraseña indicada cuando el reset está habilitado.
+  if (resetInitialUsers) {
+    for (const admin of INITIAL_USERS.filter(u => ['admin1', 'admin2'].includes(u.username))) {
+      await pool.query(
+        `INSERT INTO usuarios (username, password_hash, nombre, rol, zona, activo)
+         VALUES ($1,$2,$3,$4,$5,true)
+         ON CONFLICT (username)
+         DO UPDATE SET password_hash = EXCLUDED.password_hash,
+                       nombre = EXCLUDED.nombre,
+                       rol = EXCLUDED.rol,
+                       zona = EXCLUDED.zona,
+                       activo = true,
+                       actualizado_en = NOW()`,
+        [admin.username, hash, admin.nombre, admin.rol, admin.zona]
+      );
+    }
+    console.log('🔐 Reset de acceso aplicado para admin1 y admin2. Desactive RESET_INITIAL_USERS_PASSWORD después de ingresar.');
   }
 
   for (const [username, concesion] of INITIAL_ASSIGNMENTS) {
@@ -349,8 +386,9 @@ async function initDB() {
 // ============================================================
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
-  const username = sanitizeText(req.body.username || '', 50).toLowerCase();
-  const password = req.body.password;
+  const rawUsername = req.body.username || req.body.usuario || req.body.user || req.body.email || '';
+  const username = sanitizeText(rawUsername, 50).toLowerCase();
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
   if (!username || !password) {
     return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
   }
@@ -359,11 +397,13 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
     const result = await pool.query('SELECT * FROM usuarios WHERE username = $1', [username]);
     const user = result.rows[0];
     if (!user || !user.activo) {
+      console.warn(`Login fallido: usuario inexistente o inactivo [${username}]`);
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
+      console.warn(`Login fallido: contraseña inválida para [${username}]`);
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 

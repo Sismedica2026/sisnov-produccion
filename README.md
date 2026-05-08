@@ -154,3 +154,8 @@ npm start
 - ✅ Auditoría completa de todas las acciones
 - ✅ HTTPS automático en Render
 - ✅ Validación de datos en backend
+
+# Recuperación temporal de acceso inicial. Usar solo una vez y volver a false.
+RESET_INITIAL_USERS_PASSWORD=false
+INITIAL_USERS_PASSWORD=SisnovAdmin2026#Seguro
+LOGIN_RATE_LIMIT_MAX=30
