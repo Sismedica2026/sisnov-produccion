@@ -389,33 +389,75 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const rawUsername = req.body.username || req.body.usuario || req.body.user || req.body.email || '';
   const username = sanitizeText(rawUsername, 50).toLowerCase();
   const password = typeof req.body.password === 'string' ? req.body.password : '';
+
   if (!username || !password) {
     return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
   }
 
   try {
-    const result = await pool.query('SELECT * FROM usuarios WHERE username = $1', [username]);
-    const user = result.rows[0];
+    const result = await pool.query(
+      'SELECT username, password_hash, nombre, rol, zona, activo FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM($1)) LIMIT 1',
+      [username]
+    );
+
+    let user = result.rows[0];
+
     if (!user || !user.activo) {
       console.warn(`Login fallido: usuario inexistente o inactivo [${username}]`);
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
-    const valid = await bcrypt.compare(password, user.password_hash);
+    let valid = false;
+    try {
+      valid = await bcrypt.compare(password, user.password_hash || '');
+    } catch (compareError) {
+      console.error(`Login bcrypt error para [${username}]:`, compareError.message);
+      valid = false;
+    }
+
+    // Recuperación operacional controlada: si el reset está activo y la contraseña
+    // coincide con INITIAL_USERS_PASSWORD, reescribe el hash y permite el acceso.
+    const resetEnabled = process.env.RESET_INITIAL_USERS_PASSWORD === 'true';
+    const recoveryPassword = process.env.INITIAL_USERS_PASSWORD || process.env.ADMIN_PASSWORD || '';
+    const allowedRecoveryUsers = INITIAL_USERS.map(u => u.username);
+
+    if (!valid && resetEnabled && recoveryPassword && password === recoveryPassword && allowedRecoveryUsers.includes(username)) {
+      const newHash = await bcrypt.hash(recoveryPassword, 12);
+      await pool.query(
+        'UPDATE usuarios SET password_hash=$1, activo=true, actualizado_en=NOW() WHERE LOWER(TRIM(username)) = LOWER(TRIM($2))',
+        [newHash, username]
+      );
+      const refreshed = await pool.query(
+        'SELECT username, password_hash, nombre, rol, zona, activo FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM($1)) LIMIT 1',
+        [username]
+      );
+      user = refreshed.rows[0];
+      valid = true;
+      console.log(`🔐 Recuperación de login aplicada para [${username}]`);
+    }
+
     if (!valid) {
       console.warn(`Login fallido: contraseña inválida para [${username}]`);
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
-    const concesiones = await userConcesiones(user.username);
+    let concesiones = [];
+    try {
+      concesiones = await userConcesiones(user.username);
+    } catch (concesionesError) {
+      console.error(`Login concesiones error para [${username}]:`, concesionesError.message);
+      concesiones = [];
+    }
+
     const token = signToken(user);
     setSessionCookies(res, token);
 
     await logAudit(user.username, user.rol, 'LOGIN', 'Inicio de sesión exitoso', req.ip);
-    res.json({ user: publicUser(user, concesiones) });
+    console.log(`✅ Login exitoso para [${username}] rol=[${user.rol}]`);
+    return res.json({ user: publicUser(user, concesiones) });
   } catch (e) {
-    console.error('Login error:', e);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    console.error('Login error crítico:', e && (e.stack || e.message || e));
+    return res.status(500).json({ error: 'Error interno de autenticación. Revise logs Render.' });
   }
 });
 

@@ -126,35 +126,7 @@ const API = {
 };
 
 // ── INIT ──────────────────────────────────────────────────
-window.addEventListener('error', (event) => {
-  const err = document.getElementById('lerr');
-  if (err && !CU) {
-    err.textContent = 'Error de interfaz: ' + (event.message || 'revise consola del navegador');
-    err.classList.add('show');
-  }
-});
-
-function bindLoginEvents() {
-  const form = document.getElementById('loginForm');
-  const btn = document.getElementById('loginBtn') || document.querySelector('.lbtn');
-
-  if (form) {
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-      doLogin();
-    });
-  }
-
-  if (btn && !form) {
-    btn.addEventListener('click', (event) => {
-      event.preventDefault();
-      doLogin();
-    });
-  }
-}
-
 window.addEventListener('DOMContentLoaded', async () => {
-  bindLoginEvents();
   try {
     const data = await API.get('/api/auth/me');
     API.save(data.user);
@@ -165,12 +137,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 // ── LOGIN ─────────────────────────────────────────────────
 async function doLogin() {
-  const userInput = document.getElementById('lu');
-  const passInput = document.getElementById('lp');
-  const u = userInput ? userInput.value.trim().toLowerCase() : '';
-  const p = passInput ? passInput.value : '';
+  const u = document.getElementById('lu').value.trim().toLowerCase();
+  const p = document.getElementById('lp').value;
   const err = document.getElementById('lerr');
-  const btn = document.getElementById('loginBtn') || document.querySelector('.lbtn');
+  const btn = document.querySelector('.lbtn');
   if (!u || !p) { err.textContent='Complete usuario y contraseña.'; err.classList.add('show'); return; }
   btn.textContent = 'Verificando...'; btn.disabled = true;
   try {
@@ -182,13 +152,11 @@ async function doLogin() {
   } catch(e) {
     err.textContent = e.message || 'Credenciales incorrectas.';
     err.classList.add('show');
-    if (passInput) passInput.value = '';
+    document.getElementById('lp').value = '';
   } finally {
     btn.textContent = 'Ingresar al Sistema →'; btn.disabled = false;
   }
 }
-
-window.doLogin = doLogin;
 
 function initApp() {
   document.getElementById('loginScreen').style.display = 'none';
@@ -221,7 +189,7 @@ async function doLogout() {
   document.getElementById('appShell').classList.remove('vis');
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('lu').value = '';
-  if (passInput) passInput.value = '';
+  document.getElementById('lp').value = '';
 }
 
 // ── DATA ACCESS ───────────────────────────────────────────

@@ -234,11 +234,9 @@ td{padding:9px 12px;vertical-align:middle;}
     <div class="lbox">
       <h2>🔐 Iniciar Sesión</h2>
       <div class="lerr" id="lerr">Credenciales incorrectas. Intente nuevamente.</div>
-      <form id="loginForm" autocomplete="on" novalidate>
-        <div class="lf"><label>Usuario</label><input type="text" id="lu" name="username" placeholder="usuario" autocomplete="username" required></div>
-        <div class="lf"><label>Contraseña</label><input type="password" id="lp" name="password" placeholder="••••••••" autocomplete="current-password" required></div>
-        <button class="lbtn" id="loginBtn" type="submit">Ingresar al Sistema →</button>
-      </form>
+      <div class="lf"><label>Usuario</label><input type="text" id="lu" placeholder="usuario@sistema.co" autocomplete="username"></div>
+      <div class="lf"><label>Contraseña</label><input type="password" id="lp" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <button class="lbtn" onclick="doLogin()">Ingresar al Sistema →</button>
       <div class="lfooter">🔒 Sesión cifrada · Auditada · ISO 27001 · Ley 1581 Colombia</div>
     </div>
     <div class="lhint"><b>Acceso seguro:</b><br>
