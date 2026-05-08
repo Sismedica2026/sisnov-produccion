@@ -221,24 +221,96 @@ async function logAudit(username, rol, accion, detalle, ip) {
 }
 
 // ── DB Init ──────────────────────────────────────────────────
-async function bootstrapAdmin() {
-  const count = await pool.query('SELECT COUNT(*)::int AS total FROM usuarios');
-  if (count.rows[0].total > 0) return;
+const INITIAL_USERS = [
+  // 2 ADMINISTRADORES
+  { username: 'admin1',      nombre: 'Administrador Principal',      rol: 'admin',             zona: null },
+  { username: 'admin2',      nombre: 'Administrador Secundario',     rol: 'admin',             zona: null },
+  // GERENCIA
+  { username: 'gerente',     nombre: 'Gerente General',              rol: 'gerente',           zona: null },
+  // DIRECCIÓN POR ZONA
+  { username: 'dir.norte',   nombre: 'Director Zona Norte',          rol: 'director-norte',    zona: 'NORTE' },
+  { username: 'dir.sur',     nombre: 'Director Zona Sur',            rol: 'director-sur',      zona: 'SUR' },
+  // COORDINACIÓN POR ZONA
+  { username: 'coord.norte', nombre: 'Coordinador Zona Norte',       rol: 'coordinador-norte', zona: 'NORTE' },
+  { username: 'coord.sur',   nombre: 'Coordinador Zona Sur',         rol: 'coordinador-sur',   zona: 'SUR' },
+  // 20 SUPERVISORES
+  { username: 'sup01', nombre: 'Supervisor Norte 01', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup02', nombre: 'Supervisor Norte 02', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup03', nombre: 'Supervisor Norte 03', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup04', nombre: 'Supervisor Norte 04', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup05', nombre: 'Supervisor Norte 05', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup06', nombre: 'Supervisor Norte 06', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup07', nombre: 'Supervisor Norte 07', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup08', nombre: 'Supervisor Norte 08', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup09', nombre: 'Supervisor Norte 09', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup10', nombre: 'Supervisor Norte 10', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup11', nombre: 'Supervisor Sur 11',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup12', nombre: 'Supervisor Sur 12',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup13', nombre: 'Supervisor Sur 13',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup14', nombre: 'Supervisor Sur 14',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup15', nombre: 'Supervisor Sur 15',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup16', nombre: 'Supervisor Sur 16',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup17', nombre: 'Supervisor Sur 17',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup18', nombre: 'Supervisor Sur 18',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup19', nombre: 'Supervisor Sur 19',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup20', nombre: 'Supervisor Sur 20',   rol: 'supervisor', zona: 'SUR' }
+];
 
-  const username = sanitizeText(process.env.ADMIN_USERNAME || 'admin', 50).toLowerCase();
-  const password = process.env.ADMIN_PASSWORD;
-  const name = sanitizeText(process.env.ADMIN_NAME || 'Administrador SisNov', 100);
+const INITIAL_ASSIGNMENTS = [
+  ['sup01', 'AUTOPISTA DEL CARIBE'],
+  ['sup02', 'RUTA AL MAR ANTIOQUIA'], ['sup02', 'YUMA'],
+  ['sup03', 'YUMA'],
+  ['sup04', 'PERIMETRAL'], ['sup04', 'SISGA'],
+  ['sup05', 'COSTERA'],
+  ['sup06', 'RUTAS DEL CACAO'],
+  ['sup07', 'ACCENORTE'], ['sup07', 'AUTOPISTA DEL CARIBE'],
+  ['sup08', 'AUTOPISTA DEL RIO GRANDE'],
+  ['sup09', 'COVIANDINA'],
+  ['sup10', 'SISGA'], ['sup10', 'NORDESTE'],
+  ['sup11', 'PACIFICO 3'],
+  ['sup12', 'RUTAS DEL VALLE'], ['sup12', 'PACIFICO 3'],
+  ['sup13', 'COVIORIENTE'],
+  ['sup14', 'TUNEL DE LA LINEA'],
+  ['sup15', 'PACIFICO 2 - LA PINTADA'], ['sup15', 'TUNEL DE LA LINEA'],
+  ['sup16', 'PERIMETRAL'], ['sup16', 'RUTA BOGOTA NORTE'],
+  ['sup17', 'COVIANDINA'],
+  ['sup18', 'PANAMERICANA'],
+  ['sup19', 'VIAL DEL NUS'],
+  ['sup20', 'UNION DEL SUR']
+];
+
+async function bootstrapInitialUsers() {
+  const password = process.env.INITIAL_USERS_PASSWORD || process.env.ADMIN_PASSWORD;
 
   if (!password || !strongPassword(password)) {
-    throw new Error(`ADMIN_PASSWORD es obligatorio para crear el primer admin y debe tener mínimo ${MIN_PASSWORD_LENGTH} caracteres con 3 tipos de caracteres.`);
+    throw new Error(`INITIAL_USERS_PASSWORD o ADMIN_PASSWORD es obligatorio para crear usuarios iniciales y debe tener mínimo ${MIN_PASSWORD_LENGTH} caracteres con 3 tipos de caracteres.`);
   }
 
   const hash = await bcrypt.hash(password, 12);
-  await pool.query(
-    'INSERT INTO usuarios (username, password_hash, nombre, rol, zona, activo) VALUES ($1,$2,$3,$4,$5,true)',
-    [username, hash, name, 'admin', null]
-  );
-  console.log(`✅ Administrador inicial creado: ${username}`);
+  let created = 0;
+
+  for (const user of INITIAL_USERS) {
+    const result = await pool.query(
+      `INSERT INTO usuarios (username, password_hash, nombre, rol, zona, activo)
+       VALUES ($1,$2,$3,$4,$5,true)
+       ON CONFLICT (username) DO NOTHING
+       RETURNING username`,
+      [user.username, hash, user.nombre, user.rol, user.zona]
+    );
+    if (result.rowCount > 0) created += 1;
+  }
+
+  for (const [username, concesion] of INITIAL_ASSIGNMENTS) {
+    await pool.query(
+      `INSERT INTO asignaciones (username, concesion, asignado_por)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (username, concesion) DO NOTHING`,
+      [username, concesion, 'bootstrap']
+    );
+  }
+
+  const total = await pool.query('SELECT COUNT(*)::int AS total FROM usuarios');
+  console.log(`✅ Bootstrap de usuarios listo. Usuarios creados ahora: ${created}. Total usuarios: ${total.rows[0].total}.`);
 }
 
 async function initDB() {
@@ -250,7 +322,7 @@ async function initDB() {
     await pool.query(seed);
     console.log('⚠️ Datos demo cargados. No active SEED_DEMO_DATA en producción.');
   } else {
-    await bootstrapAdmin();
+    await bootstrapInitialUsers();
   }
   console.log('✅ Base de datos inicializada correctamente');
 }
