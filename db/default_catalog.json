@@ -1,0 +1,211 @@
+{
+  "CAT": {
+    "NORTE": {
+      "AUTOPISTA DEL CARIBE": [
+        "ARROYO DE PIEDRA",
+        "SABANA GRANDE",
+        "TURBACO"
+      ],
+      "RUTA AL MAR ANTIOQUIA": [
+        "MATA DE CAÑA",
+        "SAN ONOFRE",
+        "LORICA",
+        "MONTERIA",
+        "PLANETA RICA"
+      ],
+      "YUMA": [
+        "A06 - VALENCIA",
+        "A03 - EL DIFICIL",
+        "A04 - PLATO",
+        "A01 - TUCURINCA",
+        "A02 - EL COPEY",
+        "A05 - LA LOMA"
+      ],
+      "RUTAS DEL CACAO": [
+        "UBCI RIO SOGAMOSO",
+        "PUENTE RIO SOGAMOSO",
+        "LA LIZAMA"
+      ],
+      "PERIMETRAL": [
+        "CHOACHI",
+        "GUASCA",
+        "LA CALERA"
+      ],
+      "ACCENORTE": [
+        "ACCENORTE"
+      ],
+      "AUTOPISTA DEL RIO GRANDE": [
+        "MORRISON",
+        "PAILITAS",
+        "LA GOMEZ"
+      ],
+      "AUTOPISTA MAGDALENA MEDIO": [
+        "EL TRIQUE",
+        "EL HATO",
+        "CAMPO 23"
+      ],
+      "RUTA BOGOTA NORTE": [
+        "BUDA",
+        "INSPECTOR",
+        "CARRO TALLER",
+        "GRUA LIVIANA"
+      ],
+      "COVIANDINA": [
+        "NARANJAL",
+        "BUENAVISTA",
+        "BOQUERON",
+        "PUENTE QUETAME"
+      ],
+      "SISGA": [
+        "MACHETA",
+        "SAN LUIS DE GACENO"
+      ],
+      "ALTO MAGDALENA": [
+        "HONDA",
+        "CAMBAO",
+        "NARIÑO"
+      ],
+      "COSTERA": [
+        "CARTAGENA",
+        "GALAPA",
+        "BARRANQUILLA"
+      ],
+      "NORDESTE": [
+        "CAUCASIA",
+        "ZARAGOZA"
+      ]
+    },
+    "SUR": {
+      "COVIORIENTE": [
+        "AGUAZUL",
+        "MONTERREY",
+        "VERACRUZ",
+        "VILLANUEVA"
+      ],
+      "PACIFICO 3": [
+        "LA MANUELA",
+        "LA VIRGINIA",
+        "LA FELISA"
+      ],
+      "PACIFICO 2 - LA PINTADA": [
+        "EL GUAYABO",
+        "LA PINTADA",
+        "MULATOS"
+      ],
+      "UNION DEL SUR": [
+        "CEBADAL",
+        "RUMICHACA"
+      ],
+      "TUNEL ABURRA": [
+        "TUNEL ABURRA"
+      ],
+      "PANAMERICANA": [
+        "LA RIOJA",
+        "JALISCO",
+        "GUAYABAL"
+      ],
+      "RUTAS DEL VALLE": [
+        "MEDIACANOA",
+        "CERRITO",
+        "CIAT"
+      ],
+      "TUNEL DE LA LINEA": [
+        "ALASKA",
+        "BERMELLON",
+        "LOS PINOS",
+        "AMERICAS"
+      ],
+      "PERIMETRAL": [
+        "CHOACHI",
+        "GUASCA",
+        "LA CALERA"
+      ],
+      "VIAL DEL NUS": [
+        "SAN JOSE DEL NUS",
+        "LA PALOMA",
+        "BARBOSA"
+      ],
+      "NUEVO CAUCA": [
+        "OVEJAS"
+      ],
+      "UNION VIAL RIO PAMPLONITA": [
+        "ACACIOS",
+        "GUAYABALES"
+      ]
+    }
+  },
+  "MOV": {
+    "AUTOPISTA DEL CARIBE|ARROYO DE PIEDRA": [
+      "UM188 KPL977",
+      "UM178 HFR729"
+    ],
+    "AUTOPISTA DEL CARIBE|SABANA GRANDE": [
+      "UM213 NXS562",
+      "UM174 HFQ802"
+    ],
+    "AUTOPISTA DEL CARIBE|TURBACO": [
+      "UM193 KPM515",
+      "UM177 HFQ749"
+    ],
+    "YUMA|A06 - VALENCIA": [
+      "UM184 KPL703"
+    ],
+    "YUMA|A01 - TUCURINCA": [
+      "UM182 KPL719"
+    ],
+    "YUMA|A02 - EL COPEY": [
+      "UM183 KPL705"
+    ],
+    "YUMA|A05 - LA LOMA": [
+      "UM186 KPL979"
+    ],
+    "PERIMETRAL|CHOACHI": [
+      "UM820 HFN820"
+    ],
+    "PERIMETRAL|GUASCA": [
+      "UM819 HFN819"
+    ],
+    "SISGA|MACHETA": [
+      "UM201 KTW589"
+    ],
+    "SISGA|SAN LUIS DE GACENO": [
+      "UM200 KPM511"
+    ],
+    "COSTERA|CARTAGENA": [
+      "UM106 IJK163"
+    ],
+    "COSTERA|BARRANQUILLA": [
+      "UM000 USU107"
+    ],
+    "COVIORIENTE|AGUAZUL": [
+      "UM205 LIT467"
+    ],
+    "COVIORIENTE|MONTERREY": [
+      "UM203 LIT468"
+    ],
+    "COVIORIENTE|VERACRUZ": [
+      "UM208 LIT460"
+    ],
+    "COVIORIENTE|VILLANUEVA": [
+      "UM639 POT639"
+    ],
+    "PACIFICO 3|LA MANUELA": [
+      "UM161 HFP741"
+    ],
+    "PACIFICO 3|LA FELISA": [
+      "UM164 HFQ165"
+    ],
+    "TUNEL DE LA LINEA|BERMELLON": [
+      "UM185 KPL707"
+    ],
+    "TUNEL DE LA LINEA|ALASKA": [
+      "UM170 FYL859"
+    ],
+    "RUTAS DEL VALLE|MEDIACANOA": [
+      "UM190 KPL983"
+    ],
+    "RUTAS DEL VALLE|CERRITO": [
+      "UM189 KPL982"
+    ]
+  }
+}
