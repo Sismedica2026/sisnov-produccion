@@ -385,7 +385,9 @@ async function ensureMigrations() {
   await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS gestion_detalle TEXT`);
   await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS gestionado_por VARCHAR(50)`);
   await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS cerrado_en TIMESTAMP`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_novedades_estado ON novedades(estado)`);
 }
+
 
 async function seedDefaultCatalog() {
   const count = await pool.query('SELECT COUNT(*)::int AS total FROM catalogo_concesiones');
