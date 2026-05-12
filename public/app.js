@@ -957,3 +957,79 @@ async function addCatalogPuesto(){try{await API.post('/api/catalogos/puestos',{z
 async function addCatalogPlaca(){try{await API.post('/api/catalogos/placas',{zona:document.getElementById('cat-zona-m').value,concesion:document.getElementById('cat-con-m').value,puesto:document.getElementById('cat-puesto-m').value,placa:document.getElementById('cat-placa').value});document.getElementById('cat-placa').value='';renderCatalogos();}catch(e){alert(e.message);}}
 async function delCatalogCon(z,c){if(!confirm('¿Eliminar concesión del catálogo?'))return;try{await API.delete(`/api/catalogos/concesiones/${z}/${c}`);renderCatalogos();}catch(e){alert(e.message);}}
 async function delCatalogPuesto(z,c,p){if(!confirm('¿Eliminar puesto del catálogo?'))return;try{await API.delete(`/api/catalogos/puestos/${z}/${c}/${p}`);renderCatalogos();}catch(e){alert(e.message);}}
+
+// ============================================================
+// V2.1 — Histórico de placas, KPIs Power BI y criticidades dashboard
+// ============================================================
+async function getPlacasHistorico() {
+  try {
+    if (!CU || !['admin','gerente'].includes(CU.rol)) return [];
+    const data = await API.get('/api/catalogos/placas/historial');
+    return data.placas || [];
+  } catch(e) { return []; }
+}
+
+// Reemplaza renderCatalogos para mostrar placa activa + histórico conservado.
+renderCatalogos = async function() {
+  await cargarCatalogos(); buildCatSelects();
+  const el=document.getElementById('catalog-list'); if(!el)return;
+  const hist = await getPlacasHistorico();
+  const histMap = {};
+  hist.forEach(x => {
+    const key = `${x.concesion}|${x.puesto}`;
+    histMap[key] = histMap[key] || [];
+    histMap[key].push(x);
+  });
+  el.innerHTML=Object.entries(CAT).map(([zona,cons])=>`<div class="card" style="padding:14px"><div class="ct2">${zona}</div>${Object.entries(cons).sort().map(([c,puestos])=>`<div style="border-top:1px solid var(--border);padding:10px 0"><div style="display:flex;justify-content:space-between;gap:8px"><b>${c}</b><button class="btn btn-s btn-sm" onclick="delCatalogCon('${zona}','${encodeURIComponent(c)}')">Eliminar concesión</button></div><div style="margin-top:6px">${(puestos||[]).map(p=>{const key=c+'|'+p; const active=(MOV[key]||[]); const old=(histMap[key]||[]).filter(x=>!x.activo); return `<div style="font-size:.78rem;color:var(--muted);padding:7px 0;border-top:1px dashed var(--border)">• <b>${p}</b> <button class="btn btn-s btn-sm" onclick="delCatalogPuesto('${zona}','${encodeURIComponent(c)}','${encodeURIComponent(p)}')">Eliminar puesto</button><br><span style="color:#1a7a3c;font-weight:700">Activa: ${active.length?active.join(' · '):'Sin placa activa'}</span>${old.length?`<details style="margin-top:5px"><summary style="cursor:pointer;color:#294996">Histórico de placas (${old.length})</summary><div style="margin-top:5px">${old.map(h=>`<span class="badge" style="background:#f3f4f6;color:#444;margin:2px">${h.placa} · inactiva · ${h.desactivado_en_formato||h.creado_en_formato||''}</span>`).join('')}</div></details>`:''}</div>`}).join('')||'<span class="tdm">Sin puestos</span>'}</div></div>`).join('')}</div>`).join('');
+};
+
+function renderCriticidadResumen(rows) {
+  if (!rows || !rows.length) return empty('🎯','Sin criticidades registradas.');
+  const top = rows.slice(0, 12);
+  return `<div style="display:grid;gap:8px">${top.map(r => {
+    const nivel = r.nivel || '—';
+    const cls = nivel === 'CRITICA' ? 'b-critica' : nivel === 'MEDIA' ? 'b-media' : 'b-baja';
+    return `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:1px solid var(--border);padding:7px 0">
+      <div style="min-width:0"><span class="badge ${cls}">${nivel}</span> <b>${r.area || '—'}</b><br><span class="tdm">${r.tipo_novedad || '—'} · Estado: ${r.estado || '—'}</span></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.35rem;color:var(--accent2)">${r.total}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+const _dashV21 = renderDash;
+renderDash = async function() {
+  await _dashV21();
+  try {
+    const data = await API.get('/api/reportes/resumen');
+    let panel=document.getElementById('dash-criticidad-extra');
+    const anchor=document.getElementById('dash-estado-extra') || document.querySelector('#pg-dashboard .g2');
+    if(!panel){panel=document.createElement('div');panel.id='dash-criticidad-extra';panel.className='card';anchor.after(panel);}
+    const t=data.tiemposCierre || {};
+    panel.innerHTML=`<div class="ch"><div class="ct2">🎯 Resumen de criticidades y oportunidad de cierre</div><div class="tdm">KPI gerencial</div></div>
+      <div class="g3" style="margin-bottom:14px">
+        <div><div class="sl">Cerradas</div><div class="sv vgr">${t.cerradas || 0}</div></div>
+        <div><div class="sl">Horas prom. cierre</div><div class="sv vb">${t.horas_promedio_cierre || '—'}</div></div>
+        <div><div class="sl">Horas prom. abiertas</div><div class="sv vr">${t.horas_promedio_abiertas || '—'}</div></div>
+      </div>
+      ${renderCriticidadResumen(data.porCriticidadDetalle || [])}`;
+  } catch(e) { console.warn('Resumen criticidades no disponible:', e.message); }
+};
+
+const _repV21 = renderRep;
+renderRep = async function() {
+  await _repV21();
+  try {
+    const data = await API.get('/api/reportes/resumen');
+    let crit=document.getElementById('r-criticidad-card');
+    if(!crit){crit=document.createElement('div');crit.id='r-criticidad-card';crit.className='card';crit.innerHTML='<div class="ct2" style="margin-bottom:14px">🎯 Criticidades por área, tipo y estado</div><div id="r-criticidad"></div>';document.querySelector('#pg-reportes')?.appendChild(crit);}
+    document.getElementById('r-criticidad').innerHTML=renderCriticidadResumen(data.porCriticidadDetalle || []);
+    let bi=document.getElementById('r-bi-card');
+    if(!bi && ['admin','gerente'].includes(CU.rol)){
+      bi=document.createElement('div');bi.id='r-bi-card';bi.className='card';document.querySelector('#pg-reportes')?.appendChild(bi);
+    }
+    if(bi){bi.innerHTML=`<div class="ct2" style="margin-bottom:10px">📊 Integración Power BI Gerencial</div>
+      <div class="pgs">Endpoint seguro para conectar Power BI Web/API. Use header <b>x-bi-token</b> con la variable <b>BI_API_TOKEN</b> configurada en Render.</div>
+      <code style="display:block;background:var(--surface2);padding:10px;border-radius:8px;margin-top:8px;font-size:.75rem;white-space:pre-wrap">${location.origin}/api/bi/kpis</code>
+      <div style="margin-top:8px;font-size:.76rem;color:var(--muted)">Incluye novedades, criticidades, responsables, concesiones y tiempos promedio de cierre.</div>`;}
+  } catch(e) { console.warn('Reportes v2.1 no disponibles:', e.message); }
+};
