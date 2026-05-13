@@ -70,8 +70,15 @@ app.use(helmet({
     useDefaults: true,
     directives: {
       "default-src": ["'self'"],
-      "script-src": ["'self'"],
-      "style-src": ["'self'", "'unsafe-inline'"],
+      "script-src": ["'self'", "'unsafe-inline'"],
+      // La aplicación heredada usa manejadores HTML como onclick/onchange.
+      // CSP3 bloquea esos atributos con script-src-attr si no se declara explícitamente.
+      // Se habilita solo para atributos, manteniendo connect-src, frame-ancestors y demás restricciones.
+      "script-src-attr": ["'unsafe-inline'"],
+      "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      "style-src-elem": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      "style-src-attr": ["'unsafe-inline'"],
+      "font-src": ["'self'", "https://fonts.gstatic.com", "data:"],
       "img-src": ["'self'", 'data:'],
       "connect-src": ["'self'"],
       "form-action": ["'self'"],
@@ -93,16 +100,26 @@ app.use(cors({
 
 app.use(express.json({ limit: '200kb' }));
 app.use(cookieParser());
+// En producción evitamos que el navegador conserve versiones antiguas del login.
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path.endsWith('.html') || req.path.endsWith('.js')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, '../public'), {
   extensions: ['html'],
-  maxAge: isProduction ? '1h' : 0,
-  etag: true
+  maxAge: 0,
+  etag: false
 }));
 
 // Rate limiting — protección contra abuso y fuerza bruta
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: Number(process.env.LOGIN_RATE_LIMIT_MAX || 30),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiados intentos. Espere 15 minutos.' }
@@ -221,43 +238,152 @@ async function logAudit(username, rol, accion, detalle, ip) {
 }
 
 // ── DB Init ──────────────────────────────────────────────────
-async function bootstrapAdmin() {
-  const count = await pool.query('SELECT COUNT(*)::int AS total FROM usuarios');
-  if (count.rows[0].total > 0) return;
+const INITIAL_USERS = [
+  // 2 ADMINISTRADORES
+  { username: 'admin1',      nombre: 'Administrador Principal',      rol: 'admin',             zona: null },
+  { username: 'admin2',      nombre: 'Administrador Secundario',     rol: 'admin',             zona: null },
+  // GERENCIA
+  { username: 'gerente',     nombre: 'Gerente General',              rol: 'gerente',           zona: null },
+  // DIRECCIÓN POR ZONA
+  { username: 'dir.norte',   nombre: 'Director Zona Norte',          rol: 'director-norte',    zona: 'NORTE' },
+  { username: 'dir.sur',     nombre: 'Director Zona Sur',            rol: 'director-sur',      zona: 'SUR' },
+  // COORDINACIÓN POR ZONA
+  { username: 'coord.norte', nombre: 'Coordinador Zona Norte',       rol: 'coordinador-norte', zona: 'NORTE' },
+  { username: 'coord.sur',   nombre: 'Coordinador Zona Sur',         rol: 'coordinador-sur',   zona: 'SUR' },
+  // 20 SUPERVISORES
+  { username: 'sup01', nombre: 'Supervisor Norte 01', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup02', nombre: 'Supervisor Norte 02', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup03', nombre: 'Supervisor Norte 03', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup04', nombre: 'Supervisor Norte 04', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup05', nombre: 'Supervisor Norte 05', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup06', nombre: 'Supervisor Norte 06', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup07', nombre: 'Supervisor Norte 07', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup08', nombre: 'Supervisor Norte 08', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup09', nombre: 'Supervisor Norte 09', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup10', nombre: 'Supervisor Norte 10', rol: 'supervisor', zona: 'NORTE' },
+  { username: 'sup11', nombre: 'Supervisor Sur 11',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup12', nombre: 'Supervisor Sur 12',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup13', nombre: 'Supervisor Sur 13',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup14', nombre: 'Supervisor Sur 14',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup15', nombre: 'Supervisor Sur 15',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup16', nombre: 'Supervisor Sur 16',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup17', nombre: 'Supervisor Sur 17',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup18', nombre: 'Supervisor Sur 18',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup19', nombre: 'Supervisor Sur 19',   rol: 'supervisor', zona: 'SUR' },
+  { username: 'sup20', nombre: 'Supervisor Sur 20',   rol: 'supervisor', zona: 'SUR' }
+];
 
-  const username = sanitizeText(process.env.ADMIN_USERNAME || 'admin', 50).toLowerCase();
-  const password = process.env.ADMIN_PASSWORD;
-  const name = sanitizeText(process.env.ADMIN_NAME || 'Administrador SisNov', 100);
+const INITIAL_ASSIGNMENTS = [
+  ['sup01', 'AUTOPISTA DEL CARIBE'],
+  ['sup02', 'RUTA AL MAR ANTIOQUIA'], ['sup02', 'YUMA'],
+  ['sup03', 'YUMA'],
+  ['sup04', 'PERIMETRAL'], ['sup04', 'SISGA'],
+  ['sup05', 'COSTERA'],
+  ['sup06', 'RUTAS DEL CACAO'],
+  ['sup07', 'ACCENORTE'], ['sup07', 'AUTOPISTA DEL CARIBE'],
+  ['sup08', 'AUTOPISTA DEL RIO GRANDE'],
+  ['sup09', 'COVIANDINA'],
+  ['sup10', 'SISGA'], ['sup10', 'NORDESTE'],
+  ['sup11', 'PACIFICO 3'],
+  ['sup12', 'RUTAS DEL VALLE'], ['sup12', 'PACIFICO 3'],
+  ['sup13', 'COVIORIENTE'],
+  ['sup14', 'TUNEL DE LA LINEA'],
+  ['sup15', 'PACIFICO 2 - LA PINTADA'], ['sup15', 'TUNEL DE LA LINEA'],
+  ['sup16', 'PERIMETRAL'], ['sup16', 'RUTA BOGOTA NORTE'],
+  ['sup17', 'COVIANDINA'],
+  ['sup18', 'PANAMERICANA'],
+  ['sup19', 'VIAL DEL NUS'],
+  ['sup20', 'UNION DEL SUR']
+];
+
+function envFlagEnabled(value) {
+  return ['true', '1', 'yes', 'si', 'sí'].includes(String(value || '').trim().toLowerCase());
+}
+
+async function bootstrapInitialUsers() {
+  const password = process.env.INITIAL_USERS_PASSWORD || process.env.ADMIN_PASSWORD;
+  const resetInitialUsers = envFlagEnabled(process.env.RESET_INITIAL_USERS_PASSWORD);
 
   if (!password || !strongPassword(password)) {
-    throw new Error(`ADMIN_PASSWORD es obligatorio para crear el primer admin y debe tener mínimo ${MIN_PASSWORD_LENGTH} caracteres con 3 tipos de caracteres.`);
+    throw new Error(`INITIAL_USERS_PASSWORD o ADMIN_PASSWORD es obligatorio para crear usuarios iniciales y debe tener mínimo ${MIN_PASSWORD_LENGTH} caracteres con 3 tipos de caracteres.`);
   }
 
   const hash = await bcrypt.hash(password, 12);
-  await pool.query(
-    'INSERT INTO usuarios (username, password_hash, nombre, rol, zona, activo) VALUES ($1,$2,$3,$4,$5,true)',
-    [username, hash, name, 'admin', null]
-  );
-  console.log(`✅ Administrador inicial creado: ${username}`);
+  let created = 0;
+  let updated = 0;
+
+  for (const user of INITIAL_USERS) {
+    const result = await pool.query(
+      `INSERT INTO usuarios (username, password_hash, nombre, rol, zona, activo)
+       VALUES ($1,$2,$3,$4,$5,true)
+       ON CONFLICT (username) DO NOTHING
+       RETURNING username`,
+      [user.username, hash, user.nombre, user.rol, user.zona]
+    );
+    if (result.rowCount > 0) created += 1;
+
+    // Recuperación segura: si RESET_INITIAL_USERS_PASSWORD=true, actualiza contraseña
+    // de TODOS los usuarios iniciales existentes sin borrar registros ni novedades.
+    if (resetInitialUsers && result.rowCount === 0) {
+      const updateResult = await pool.query(
+        `UPDATE usuarios
+         SET password_hash = $2,
+             nombre = $3,
+             rol = $4,
+             zona = $5,
+             activo = true,
+             actualizado_en = NOW()
+         WHERE LOWER(TRIM(username)) = LOWER(TRIM($1))`,
+        [user.username, hash, user.nombre, user.rol, user.zona]
+      );
+      updated += updateResult.rowCount;
+    }
+  }
+
+  // Garantía adicional para recuperación de acceso: admin1 y admin2 siempre quedan
+  // activos y con la contraseña indicada cuando el reset está habilitado.
+  if (resetInitialUsers) {
+    for (const admin of INITIAL_USERS.filter(u => ['admin1', 'admin2'].includes(u.username))) {
+      await pool.query(
+        `INSERT INTO usuarios (username, password_hash, nombre, rol, zona, activo)
+         VALUES ($1,$2,$3,$4,$5,true)
+         ON CONFLICT (username)
+         DO UPDATE SET password_hash = EXCLUDED.password_hash,
+                       nombre = EXCLUDED.nombre,
+                       rol = EXCLUDED.rol,
+                       zona = EXCLUDED.zona,
+                       activo = true,
+                       actualizado_en = NOW()`,
+        [admin.username, hash, admin.nombre, admin.rol, admin.zona]
+      );
+    }
+    console.log('🔐 Reset de acceso aplicado para admin1 y admin2. Desactive RESET_INITIAL_USERS_PASSWORD después de ingresar.');
+  }
+
+  for (const [username, concesion] of INITIAL_ASSIGNMENTS) {
+    await pool.query(
+      `INSERT INTO asignaciones (username, concesion, asignado_por)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (username, concesion) DO NOTHING`,
+      [username, concesion, 'bootstrap']
+    );
+  }
+
+  const total = await pool.query('SELECT COUNT(*)::int AS total FROM usuarios');
+  const resetMsg = resetInitialUsers ? ` Usuarios existentes actualizados: ${updated}.` : '';
+  console.log(`✅ Bootstrap de usuarios listo. Usuarios creados ahora: ${created}.${resetMsg} Total usuarios: ${total.rows[0].total}.`);
 }
 
 async function initDB() {
   const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
   await pool.query(schema);
 
-  // Migraciones seguras para bases existentes: no borran datos.
-  await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA'`);
-  await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS gestionado_en TIMESTAMP`);
-  await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS cerrado_en TIMESTAMP`);
-  await pool.query(`UPDATE novedades SET estado='ABIERTA' WHERE estado IS NULL OR estado=''`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_novedades_estado ON novedades(estado)`);
-
   if (process.env.SEED_DEMO_DATA === 'true') {
     const seed = fs.readFileSync(path.join(__dirname, '../db/seed_demo.sql'), 'utf8');
     await pool.query(seed);
     console.log('⚠️ Datos demo cargados. No active SEED_DEMO_DATA en producción.');
   } else {
-    await bootstrapAdmin();
+    await bootstrapInitialUsers();
   }
   console.log('✅ Base de datos inicializada correctamente');
 }
@@ -267,8 +393,9 @@ async function initDB() {
 // ============================================================
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
-  const username = sanitizeText(req.body.username || '', 50).toLowerCase();
-  const password = req.body.password;
+  const rawUsername = req.body.username || req.body.usuario || req.body.user || req.body.email || '';
+  const username = sanitizeText(rawUsername, 50).toLowerCase();
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
   if (!username || !password) {
     return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
   }
@@ -277,11 +404,13 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
     const result = await pool.query('SELECT * FROM usuarios WHERE username = $1', [username]);
     const user = result.rows[0];
     if (!user || !user.activo) {
+      console.warn(`Login fallido: usuario inexistente o inactivo [${username}]`);
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
+      console.warn(`Login fallido: contraseña inválida para [${username}]`);
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
@@ -318,7 +447,6 @@ app.get('/api/novedades', auth, async (req, res) => {
     const { desde, hasta } = req.query;
     const area = sanitizeText(req.query.area || '', 30);
     const nivel = sanitizeText(req.query.nivel || '', 10);
-    const estado = sanitizeText(req.query.estado || '', 20).toUpperCase();
     const concesion = sanitizeText(req.query.concesion || '', 100);
 
     let where = [];
@@ -333,7 +461,6 @@ app.get('/api/novedades', auth, async (req, res) => {
     if (hasta)     { where.push(`n.creado_en <= $${i++}`); params.push(hasta + ' 23:59:59'); }
     if (area)      { where.push(`n.area = $${i++}`);       params.push(area); }
     if (nivel)     { where.push(`n.nivel = $${i++}`);      params.push(nivel); }
-    if (estado)    { where.push(`n.estado = $${i++}`);     params.push(estado); }
     if (concesion) { where.push(`n.concesion = $${i++}`);  params.push(concesion); }
 
     const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
@@ -396,43 +523,6 @@ app.post('/api/novedades', auth, requireRoles('admin','coordinador-norte','coord
   } catch (e) {
     console.error('POST novedad error:', e);
     res.status(500).json({ error: 'Error al guardar novedad' });
-  }
-});
-
-
-app.patch('/api/novedades/:id/estado', auth, requireRoles('admin','gerente','director-norte','director-sur','coordinador-norte','coordinador-sur'), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const estado = sanitizeText(req.body.estado || '', 20).toUpperCase();
-  if (!id || !validEnum(estado, ['ABIERTA','GESTION','CERRADA'])) {
-    return res.status(400).json({ error: 'Estado inválido' });
-  }
-
-  try {
-    const current = await pool.query('SELECT * FROM novedades WHERE id=$1', [id]);
-    const novedad = current.rows[0];
-    if (!novedad) return res.status(404).json({ error: 'Novedad no encontrada' });
-
-    if ((req.user.rol === 'director-norte' || req.user.rol === 'coordinador-norte') && novedad.zona !== 'NORTE') {
-      return res.status(403).json({ error: 'No autorizado para esta zona' });
-    }
-    if ((req.user.rol === 'director-sur' || req.user.rol === 'coordinador-sur') && novedad.zona !== 'SUR') {
-      return res.status(403).json({ error: 'No autorizado para esta zona' });
-    }
-
-    const result = await pool.query(`
-      UPDATE novedades
-      SET estado=$1,
-          gestionado_en = CASE WHEN $1='GESTION' AND gestionado_en IS NULL THEN NOW() ELSE gestionado_en END,
-          cerrado_en = CASE WHEN $1='CERRADA' THEN NOW() ELSE NULL END
-      WHERE id=$2
-      RETURNING *, TO_CHAR(creado_en AT TIME ZONE 'America/Bogota', 'DD/MM/YYYY HH24:MI:SS') as fecha_formato
-    `, [estado, id]);
-
-    await logAudit(req.user.username, req.user.rol, 'CAMBIO_ESTADO', `Novedad #${id}: ${novedad.estado || 'ABIERTA'} → ${estado}`, req.ip);
-    res.json({ novedad: result.rows[0] });
-  } catch (e) {
-    console.error('PATCH estado novedad error:', e);
-    res.status(500).json({ error: 'Error al actualizar estado' });
   }
 });
 
@@ -592,11 +682,10 @@ app.get('/api/reportes/resumen', auth, async (req, res) => {
     if (rol === 'director-norte' || rol === 'coordinador-norte') zFilter = "AND zona='NORTE'";
     else if (rol === 'director-sur' || rol === 'coordinador-sur') zFilter = "AND zona='SUR'";
 
-    const [totales, porArea, porNivel, porEstado, porZona, porCon] = await Promise.all([
+    const [totales, porArea, porNivel, porZona, porCon] = await Promise.all([
       pool.query(`SELECT COUNT(*) as total, zona FROM novedades WHERE 1=1 ${zFilter} GROUP BY zona`),
       pool.query(`SELECT area, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY area ORDER BY total DESC`),
       pool.query(`SELECT nivel, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY nivel`),
-      pool.query(`SELECT estado, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY estado`),
       pool.query(`SELECT zona, COUNT(*) as total FROM novedades GROUP BY zona`),
       pool.query(`SELECT concesion, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY concesion ORDER BY total DESC LIMIT 10`)
     ]);
@@ -605,12 +694,163 @@ app.get('/api/reportes/resumen', auth, async (req, res) => {
       totales: totales.rows,
       porArea: porArea.rows,
       porNivel: porNivel.rows,
-      porEstado: porEstado.rows,
       porZona: porZona.rows,
       porConcesion: porCon.rows
     });
   } catch {
     res.status(500).json({ error: 'Error al obtener reportes' });
+  }
+});
+
+
+// ============================================================
+// RUTA POWER BI / KPIs GERENCIALES
+// IMPORTANTE: esta ruta debe estar ANTES del fallback app.get('*')
+// para evitar que Power BI reciba index.html en vez de JSON.
+// ============================================================
+function extractBiToken(req) {
+  const authorization = req.get('authorization') || '';
+  const bearer = authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : '';
+  return (
+    req.get('x-api-key') ||
+    req.get('x-bi-token') ||
+    bearer ||
+    req.query.api_key ||
+    req.query.token ||
+    ''
+  ).trim();
+}
+
+function requireBiToken(req, res, next) {
+  const expected = String(process.env.BI_API_TOKEN || '').trim();
+  if (!expected) {
+    return res.status(503).type('application/json').json({
+      error: 'BI_API_TOKEN no configurado en el servidor'
+    });
+  }
+  const received = extractBiToken(req);
+  if (received !== expected) {
+    return res.status(401).type('application/json').json({ error: 'Token BI inválido o ausente' });
+  }
+  next();
+}
+
+async function tableColumns(tableName) {
+  const result = await pool.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = $1
+  `, [tableName]);
+  return new Set(result.rows.map(r => r.column_name));
+}
+
+function sqlCol(cols, name, alias, fallback = 'NULL') {
+  return cols.has(name) ? `n.${name} AS ${alias || name}` : `${fallback} AS ${alias || name}`;
+}
+
+app.get('/api/bi/kpis', requireBiToken, async (req, res) => {
+  res.type('application/json');
+  try {
+    const cols = await tableColumns('novedades');
+    const estadoExpr = cols.has('estado') ? 'n.estado' : "'ABIERTA'";
+    const fechaCierreExpr = cols.has('cerrado_en') ? 'n.cerrado_en' : (cols.has('fecha_cierre') ? 'n.fecha_cierre' : 'NULL');
+    const gestionExpr = cols.has('gestion') ? 'n.gestion' : (cols.has('observacion_gestion') ? 'n.observacion_gestion' : 'NULL');
+    const responsableExpr = cols.has('responsable_cierre') ? 'n.responsable_cierre' : (cols.has('gestionado_por') ? 'n.gestionado_por' : 'NULL');
+
+    const novedadesSql = `
+      SELECT
+        n.id,
+        n.zona,
+        n.concesion,
+        n.puesto,
+        ${sqlCol(cols, 'movil', 'placa')},
+        n.area,
+        n.tipo_novedad AS tipo,
+        n.nivel AS criticidad,
+        ${estadoExpr} AS estado,
+        n.descripcion AS hallazgo_descripcion,
+        n.registrado_por,
+        n.nombre_supervisor AS supervisor,
+        ${gestionExpr} AS gestion_observacion,
+        ${responsableExpr} AS responsable_cierre,
+        n.creado_en,
+        ${fechaCierreExpr} AS cerrado_en,
+        CASE
+          WHEN ${fechaCierreExpr} IS NOT NULL THEN ROUND(EXTRACT(EPOCH FROM (${fechaCierreExpr} - n.creado_en))/3600, 2)
+          ELSE NULL
+        END AS horas_cierre
+      FROM novedades n
+      ORDER BY n.creado_en DESC
+      LIMIT 5000
+    `;
+
+    const [novedadesResult, criticidadesResult, responsablesResult, concesionesResult, cierresResult, resumenResult] = await Promise.all([
+      pool.query(novedadesSql),
+      pool.query(`
+        SELECT nivel AS criticidad, COUNT(*)::int AS total
+        FROM novedades
+        GROUP BY nivel
+        ORDER BY total DESC
+      `),
+      pool.query(`
+        SELECT COALESCE(nombre_supervisor, registrado_por, 'SIN RESPONSABLE') AS responsable, COUNT(*)::int AS total
+        FROM novedades
+        GROUP BY COALESCE(nombre_supervisor, registrado_por, 'SIN RESPONSABLE')
+        ORDER BY total DESC
+        LIMIT 50
+      `),
+      pool.query(`
+        SELECT concesion, COUNT(*)::int AS total
+        FROM novedades
+        GROUP BY concesion
+        ORDER BY total DESC
+        LIMIT 100
+      `),
+      pool.query(`
+        SELECT TO_CHAR(creado_en::date, 'YYYY-MM-DD') AS fecha, COUNT(*)::int AS total
+        FROM novedades
+        GROUP BY creado_en::date
+        ORDER BY fecha DESC
+        LIMIT 180
+      `),
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total_novedades,
+          SUM(CASE WHEN nivel = 'CRITICA' THEN 1 ELSE 0 END)::int AS criticas,
+          SUM(CASE WHEN nivel = 'MEDIA' THEN 1 ELSE 0 END)::int AS medias,
+          SUM(CASE WHEN nivel = 'BAJA' THEN 1 ELSE 0 END)::int AS bajas
+        FROM novedades
+      `)
+    ]);
+
+    const novedades = novedadesResult.rows;
+    const abiertas = novedades.filter(n => String(n.estado || '').toUpperCase() === 'ABIERTA').length;
+    const gestion = novedades.filter(n => ['GESTION', 'EN GESTION', 'EN_GESTION'].includes(String(n.estado || '').toUpperCase())).length;
+    const cerradas = novedades.filter(n => String(n.estado || '').toUpperCase() === 'CERRADA').length;
+    const cierresConTiempo = novedades.filter(n => n.horas_cierre !== null && n.horas_cierre !== undefined);
+    const promedioHorasCierre = cierresConTiempo.length
+      ? Number((cierresConTiempo.reduce((acc, n) => acc + Number(n.horas_cierre || 0), 0) / cierresConTiempo.length).toFixed(2))
+      : null;
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      generado_en: new Date().toISOString(),
+      resumen: {
+        ...(resumenResult.rows[0] || {}),
+        abiertas,
+        en_gestion: gestion,
+        cerradas,
+        promedio_horas_cierre: promedioHorasCierre
+      },
+      novedades,
+      criticidades: criticidadesResult.rows,
+      responsables: responsablesResult.rows,
+      concesiones: concesionesResult.rows,
+      cierres_diarios: cierresResult.rows
+    });
+  } catch (e) {
+    console.error('BI KPIs error:', e);
+    res.status(500).json({ error: 'Error generando KPIs BI', detalle: isProduction ? undefined : e.message });
   }
 });
 

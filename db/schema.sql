@@ -39,13 +39,10 @@ CREATE TABLE IF NOT EXISTS novedades (
   area VARCHAR(30) NOT NULL,
   tipo_novedad VARCHAR(100) NOT NULL,
   nivel VARCHAR(10) NOT NULL CHECK (nivel IN ('BAJA','MEDIA','CRITICA')),
-  estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA' CHECK (estado IN ('ABIERTA','GESTION','CERRADA')),
   descripcion TEXT NOT NULL,
   registrado_por VARCHAR(50) REFERENCES usuarios(username),
   nombre_supervisor VARCHAR(100),
-  creado_en TIMESTAMP DEFAULT NOW(),
-  gestionado_en TIMESTAMP,
-  cerrado_en TIMESTAMP
+  creado_en TIMESTAMP DEFAULT NOW()
 );
 
 -- HISTORIAL DE CAMBIOS (auditoría)
@@ -64,7 +61,6 @@ CREATE INDEX IF NOT EXISTS idx_novedades_zona ON novedades(zona);
 CREATE INDEX IF NOT EXISTS idx_novedades_fecha ON novedades(creado_en);
 CREATE INDEX IF NOT EXISTS idx_novedades_usuario ON novedades(registrado_por);
 CREATE INDEX IF NOT EXISTS idx_novedades_nivel ON novedades(nivel);
-CREATE INDEX IF NOT EXISTS idx_novedades_estado ON novedades(estado);
 CREATE INDEX IF NOT EXISTS idx_asignaciones_user ON asignaciones(username);
 
 -- Datos iniciales: por seguridad no se cargan usuarios demo en producción.

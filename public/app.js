@@ -1,6 +1,7 @@
 // ============================================================
 // SEGUIMIENTO NOVEDADES OPERATIVAS - Sismedica SAS
 // Cliente JavaScript — conecta con API backend
+// CSP legacy event compatibility: server permits script-src-attr for existing HTML handlers
 // ============================================================
 
 // ── CONSTANTS ─────────────────────────────────────────────
@@ -22,11 +23,9 @@ const AVC = {
   "coordinador-norte":"#0e7a4e", "coordinador-sur":"#0e7a4e",
   supervisor:"#1a7a3c"
 };
-const ESTADOS = { ABIERTA:'Abierta', GESTION:'En gestión', CERRADA:'Cerrada' };
-const ESTADO_CLASS = { ABIERTA:'b-abierta', GESTION:'b-gestion', CERRADA:'b-cerrada' };
 
 // ── STATE ─────────────────────────────────────────────────
-let CU = null, NV = "", fBq = "", fAr = "", fNv = "", fEs = "";
+let CU = null, NV = "", fBq = "", fAr = "", fNv = "";
 let itmr = null, iwmr = null, iwc = 30;
 let asignUser = null;
 const asignHistory = {};
@@ -354,7 +353,7 @@ async function guardar() {
     const data = await API.post('/api/novedades', {zona:z,concesion:c,puesto:p,movil:m||null,area:a,tipo_novedad:t,nivel:NV,descripcion:d});
     const n = data.novedad;
     nov.unshift({...n, fecha:n.fecha_formato, ts:new Date(n.creado_en).getTime(),
-      tipo:n.tipo_novedad, user:n.registrado_por, name:n.nombre_supervisor, movil:n.movil||'—', estado:n.estado||'ABIERTA'});
+      tipo:n.tipo_novedad, user:n.registrado_por, name:n.nombre_supervisor, movil:n.movil||'—'});
     renderDash();
     if (document.getElementById('pg-control')?.classList.contains('active')) renderControl();
     ok.style.display='flex'; ok.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -369,7 +368,7 @@ async function cargarNovedades() {
     const data = await API.get('/api/novedades');
     nov = data.novedades.map(n=>({
       ...n, fecha:n.fecha_formato, ts:new Date(n.creado_en).getTime(),
-      tipo:n.tipo_novedad, user:n.registrado_por, name:n.nombre_supervisor, movil:n.movil||'—', estado:n.estado||'ABIERTA'
+      tipo:n.tipo_novedad, user:n.registrado_por, name:n.nombre_supervisor, movil:n.movil||'—'
     }));
   } catch(e) { console.error('Error cargando novedades:', e); }
 }
@@ -394,7 +393,6 @@ async function renderDash() {
   document.getElementById('s2').textContent=data.filter(n=>n.nivel==='MEDIA').length;
   document.getElementById('s3').textContent=data.filter(n=>n.nivel==='BAJA').length;
   barchart(data,'area',document.getElementById('d-area'),{MANTENIMIENTO:'#e42421',INSUMOS:'#f0a832',BIOMEDICOS:'#294996',TH:'#1a7a3c',TECNOLOGIA:'#8b5cf6',SST:'#e67e22',NOMINA:'#1abc9c'});
-  const dest=document.getElementById('d-est'); if(dest) barchart(data,'estado',dest,{ABIERTA:'#e42421',GESTION:'#f0a832',CERRADA:'#1a7a3c'});
   const rec=[...data].slice(0,5);
   const rd=document.getElementById('d-rec');
   if (!rec.length) { rd.innerHTML=empty('⏱','Sin novedades aún.'); return; }
@@ -404,7 +402,6 @@ async function renderDash() {
         <span class="badge b-area">${n.area}</span>
         <span class="badge b-${n.nivel.toLowerCase()}">${n.nivel}</span>
       </div>
-      <div style="margin-bottom:3px"><span class="badge ${ESTADO_CLASS[n.estado]||'b-area'}">${ESTADOS[n.estado]||n.estado||'Abierta'}</span></div>
       <div style="font-weight:500">${n.puesto} — <span style="color:var(--muted)">${n.concesion}</span></div>
       <div style="color:var(--muted);font-size:.7rem;margin-top:2px">${n.tipo} · ${n.name} · ${n.fecha}</div>
     </div>`).join('');
@@ -435,49 +432,21 @@ function renderTbl() {
   if (fBq) { const q=fBq.toLowerCase(); data=data.filter(n=>JSON.stringify(n).toLowerCase().includes(q)); }
   if (fAr) data=data.filter(n=>n.area===fAr);
   if (fNv) data=data.filter(n=>n.nivel===fNv);
-  if (fEs) data=data.filter(n=>(n.estado||'ABIERTA')===fEs);
   document.getElementById('tcount').textContent=`Mostrando ${data.length} novedad(es)`;
   const tb=document.getElementById('tbody');
   if (!data.length) { tb.innerHTML=`<tr><td colspan="9">${empty('📋','No hay registros que coincidan.')}</td></tr>`; return; }
-  tb.innerHTML=data.map(n=>{
-    const estado = n.estado || 'ABIERTA';
-    const hallazgo = safeText(n.descripcion || n.hallazgo_descripcion || '—');
-    const resumen = shortText(hallazgo, 90);
-    const canManage = ['admin','gerente','director-norte','director-sur','coordinador-norte','coordinador-sur'].includes(CU.rol);
-    const estadoHtml = canManage
-      ? `<select class="si" style="width:125px;padding:5px 7px;font-size:.72rem" onchange="cambiarEstado(${n.id},this.value)">
-          ${Object.entries(ESTADOS).map(([k,v])=>`<option value="${k}" ${estado===k?'selected':''}>${v}</option>`).join('')}
-        </select>`
-      : `<span class="badge ${ESTADO_CLASS[estado]||'b-area'}">${ESTADOS[estado]||estado}</span>`;
-    return `<tr>
-      <td style="font-weight:700;color:var(--muted)">#${n.id}</td>
-      <td class="tdm" style="white-space:nowrap;font-size:.72rem">${safeText(n.fecha)}</td>
-      <td><span class="badge b-${n.zona?.toLowerCase()==='norte'?'norte':'sur'}">${safeText(n.zona)}</span></td>
-      <td style="font-size:.8rem">${safeText(n.concesion)}</td>
-      <td style="font-size:.8rem">${safeText(n.puesto)}</td>
-      <td><span class="badge b-area">${safeText(n.area)}</span></td>
-      <td class="tdm">${safeText(n.tipo)}</td>
-      <td><span class="badge b-${String(n.nivel||'').toLowerCase()}">${safeText(n.nivel)}</span></td>
-      <td>${estadoHtml}</td>
-      <td class="tdm">${safeText(n.name)}</td>
-      <td class="tdm" title="${hallazgo}">${resumen}</td>
-    </tr>`;
-  }).join('');
+  tb.innerHTML=data.map(n=>`<tr>
+    <td style="font-weight:700;color:var(--muted)">#${n.id}</td>
+    <td class="tdm" style="white-space:nowrap;font-size:.72rem">${n.fecha}</td>
+    <td><span class="badge b-${n.zona?.toLowerCase()==='norte'?'norte':'sur'}">${n.zona}</span></td>
+    <td style="font-size:.8rem">${n.concesion}</td>
+    <td style="font-size:.8rem">${n.puesto}</td>
+    <td><span class="badge b-area">${n.area}</span></td>
+    <td class="tdm">${n.tipo}</td>
+    <td><span class="badge b-${n.nivel.toLowerCase()}">${n.nivel}</span></td>
+    <td class="tdm">${n.name}</td>
+  </tr>`).join('');
 }
-function fe2(v) { fEs=v; renderTbl(); }
-
-async function cambiarEstado(id, estado) {
-  try {
-    const data = await API.patch(`/api/novedades/${id}/estado`, { estado });
-    const idx = nov.findIndex(n=>n.id===id);
-    if (idx>=0) nov[idx] = {...nov[idx], ...data.novedad, estado:data.novedad.estado||estado};
-    renderDash(); renderTbl();
-  } catch(e) {
-    alert(e.message || 'No fue posible actualizar el estado');
-    await cargarNovedades(); renderTbl();
-  }
-}
-
 function fh(v) { fBq=v; renderTbl(); }
 function fa2(v) { fAr=v; renderTbl(); }
 function fn2(v) { fNv=v; renderTbl(); }
@@ -485,8 +454,8 @@ function fn2(v) { fNv=v; renderTbl(); }
 function exportCSV() {
   const data=vis();
   if (!data.length) { alert('Sin datos para exportar.'); return; }
-  const h=['ID','Fecha','Zona','Concesion','Puesto','Movil','Area','Tipo','Nivel','Estado','Descripcion','Usuario','Nombre'];
-  const rows=data.map(n=>[n.id,n.fecha,n.zona,n.concesion,n.puesto,n.movil||'—',n.area,n.tipo,n.nivel,n.estado||'ABIERTA',
+  const h=['ID','Fecha','Zona','Concesion','Puesto','Movil','Area','Tipo','Nivel','Descripcion','Usuario','Nombre'];
+  const rows=data.map(n=>[n.id,n.fecha,n.zona,n.concesion,n.puesto,n.movil||'—',n.area,n.tipo,n.nivel,
     `"${(n.descripcion||'').replace(/"/g,'""')}"`,n.user,n.name].join(','));
   const csv=[h.join(','),...rows].join('\n');
   const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
@@ -509,7 +478,6 @@ async function renderRep() {
     };
     mkChart(data.porArea,'area',document.getElementById('r-area'),{MANTENIMIENTO:'#e42421',INSUMOS:'#f0a832',BIOMEDICOS:'#294996',TH:'#1a7a3c',TECNOLOGIA:'#8b5cf6',SST:'#e67e22',NOMINA:'#1abc9c'});
     mkChart(data.porNivel,'nivel',document.getElementById('r-niv'),{BAJA:'#1a7a3c',MEDIA:'#f0a832',CRITICA:'#e42421'});
-    if (document.getElementById('r-est')) mkChart(data.porEstado||[],'estado',document.getElementById('r-est'),{ABIERTA:'#e42421',GESTION:'#f0a832',CERRADA:'#1a7a3c'});
     mkChart(data.porConcesion,'concesion',document.getElementById('r-con'));
     const rz=document.getElementById('r-zona-card');
     if (CU.rol==='admin'||CU.rol==='gerente') {
@@ -749,14 +717,6 @@ function renderSec() {
     <div style="margin-top:11px;padding:10px 13px;background:var(--surface2);border-radius:8px;font-size:.76rem;color:var(--muted);border:1px solid var(--border);line-height:1.6">
       ⚠️ <b style="color:var(--gold)">Aviso:</b> No comparta sus credenciales. Todas las acciones quedan auditadas con usuario, rol y timestamp.
     </div>`;
-}
-
-function safeText(v) {
-  return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c] || c));
-}
-function shortText(v, max=90) {
-  const t = String(v || '—');
-  return t.length > max ? safeText(t.slice(0, max-1)) + '…' : safeText(t);
 }
 
 // ── CHART ─────────────────────────────────────────────────
