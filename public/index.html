@@ -121,8 +121,6 @@ table{width:100%;border-collapse:collapse;font-size:.8rem;}
 thead th{background:#294996;color:#fff;font-size:.63rem;text-transform:uppercase;letter-spacing:1px;padding:9px 12px;text-align:left;white-space:nowrap;font-weight:700;border-bottom:1px solid #1d3272;}
 tbody tr{border-bottom:1px solid var(--border);transition:var(--t);}
 tbody tr:hover{background:rgba(255,255,255,.02);}
-.td-hallazgo{max-width:260px;min-width:190px;font-size:.78rem;line-height:1.35;color:var(--text);white-space:normal;}
-.estado-select{width:118px;padding:5px 8px;font-size:.72rem;background:var(--surface2);}
 td{padding:9px 12px;vertical-align:middle;}
 .tdm{color:var(--muted);font-size:.74rem;}
 /* BADGES */
@@ -269,9 +267,9 @@ td{padding:9px 12px;vertical-align:middle;}
         <div class="pgs" id="dsub"></div>
         <div class="sg">
           <div class="sc ct"><div class="sl">Total Novedades</div><div class="sv vb" id="s0">0</div><div class="ss">visibles según su rol</div></div>
-          <div class="sc cc"><div class="sl">Abiertas</div><div class="sv vr" id="s1">0</div><div class="ss">pendientes de gestión</div></div>
-          <div class="sc cm"><div class="sl">En gestión</div><div class="sv vg2" id="s2">0</div><div class="ss">seguimiento activo</div></div>
-          <div class="sc cb"><div class="sl">Cerradas</div><div class="sv vgr" id="s3">0</div><div class="ss">finalizadas</div></div>
+          <div class="sc cc"><div class="sl">Críticas</div><div class="sv vr" id="s1">0</div><div class="ss">atención urgente</div></div>
+          <div class="sc cm"><div class="sl">Medias</div><div class="sv vg2" id="s2">0</div><div class="ss">seguimiento requerido</div></div>
+          <div class="sc cb"><div class="sl">Bajas</div><div class="sv vgr" id="s3">0</div><div class="ss">bajo control</div></div>
         </div>
         <div class="g2">
           <div class="card"><div class="ch"><div class="ct2">📊 Por Área</div></div><div id="d-area"></div></div>
@@ -341,10 +339,9 @@ td{padding:9px 12px;vertical-align:middle;}
             <input type="text" class="si" style="flex:1;max-width:250px;" placeholder="🔍 Buscar..." oninput="fh(this.value)">
             <select class="si" style="width:155px;" onchange="fa2(this.value)"><option value="">Todas las áreas</option><option>MANTENIMIENTO</option><option>INSUMOS</option><option>BIOMEDICOS</option><option>TH</option><option>TECNOLOGIA</option><option>SST</option><option>NOMINA</option></select>
             <select class="si" style="width:135px;" onchange="fn2(this.value)"><option value="">Todos niveles</option><option>BAJA</option><option>MEDIA</option><option>CRITICA</option></select>
-            <select class="si" style="width:145px;" onchange="fe2(this.value)"><option value="">Todos estados</option><option value="ABIERTA">Abierta</option><option value="GESTION">En gestión</option><option value="CERRADA">Cerrada</option></select>
             <button class="btn btn-s btn-sm" onclick="exportCSV()" style="margin-left:auto">⬇ CSV</button>
           </div>
-          <div class="tw"><table><thead><tr><th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th><th>Área</th><th>Tipo</th><th>Nivel</th><th>Descripción del Hallazgo</th><th>Estado</th><th>Supervisor</th></tr></thead><tbody id="tbody"></tbody></table></div>
+          <div class="tw"><table><thead><tr><th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th><th>Área</th><th>Tipo</th><th>Nivel / Estado</th><th>Supervisor</th><th>Gestión</th></tr></thead><tbody id="tbody"></tbody></table></div>
           <div style="margin-top:9px;font-size:.72rem;color:var(--muted)" id="tcount"></div>
         </div>
       </div>
@@ -357,7 +354,6 @@ td{padding:9px 12px;vertical-align:middle;}
           <div class="card"><div class="ch"><div class="ct2">📊 Por Área</div></div><div id="r-area"></div></div>
           <div class="card"><div class="ch"><div class="ct2">🎯 Por Nivel</div></div><div id="r-niv"></div></div>
         </div>
-        <div class="card"><div class="ch"><div class="ct2">📌 Por Estado</div></div><div id="r-est"></div></div>
         <div class="card"><div class="ch"><div class="ct2">🗺 Por Concesión</div></div><div id="r-con"></div></div>
         <div class="card" id="r-zona-card" style="display:none"><div class="ch"><div class="ct2">🌍 Por Zona</div></div><div id="r-zona"></div></div>
       </div>

@@ -159,3 +159,15 @@ npm start
 RESET_INITIAL_USERS_PASSWORD=false
 INITIAL_USERS_PASSWORD=SisnovAdmin2026#Seguro
 LOGIN_RATE_LIMIT_MAX=30
+
+
+## Actualización funcional 2026
+
+Incluye:
+- Estados de novedad: ABIERTA, GESTION y CERRADA.
+- Cambio obligatorio de contraseña al primer ingreso mediante `must_change_password`.
+- Cambio de contraseña propio desde “Mi clave”.
+- Catálogos administrables por admin: concesiones, puestos de trabajo y placas/UM.
+- Dashboard mejorado con control por estado.
+
+Después de desplegar, confirme que `RESET_INITIAL_USERS_PASSWORD=false` para evitar reseteos operativos.

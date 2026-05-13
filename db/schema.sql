@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   )),
   zona VARCHAR(10) CHECK (zona IN ('NORTE','SUR') OR zona IS NULL),
   activo BOOLEAN DEFAULT true,
+  must_change_password BOOLEAN DEFAULT true,
   creado_en TIMESTAMP DEFAULT NOW(),
   actualizado_en TIMESTAMP DEFAULT NOW()
 );
@@ -43,9 +44,9 @@ CREATE TABLE IF NOT EXISTS novedades (
   registrado_por VARCHAR(50) REFERENCES usuarios(username),
   nombre_supervisor VARCHAR(100),
   estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA' CHECK (estado IN ('ABIERTA','GESTION','CERRADA')),
+  gestion_detalle TEXT,
   gestionado_por VARCHAR(50),
   cerrado_en TIMESTAMP,
-  actualizado_en TIMESTAMP DEFAULT NOW(),
   creado_en TIMESTAMP DEFAULT NOW()
 );
 
@@ -65,9 +66,48 @@ CREATE INDEX IF NOT EXISTS idx_novedades_zona ON novedades(zona);
 CREATE INDEX IF NOT EXISTS idx_novedades_fecha ON novedades(creado_en);
 CREATE INDEX IF NOT EXISTS idx_novedades_usuario ON novedades(registrado_por);
 CREATE INDEX IF NOT EXISTS idx_novedades_nivel ON novedades(nivel);
-CREATE INDEX IF NOT EXISTS idx_novedades_estado ON novedades(estado);
 CREATE INDEX IF NOT EXISTS idx_asignaciones_user ON asignaciones(username);
 
 -- Datos iniciales: por seguridad no se cargan usuarios demo en producción.
 -- Use ADMIN_USERNAME, ADMIN_PASSWORD y ADMIN_NAME para crear el primer administrador.
 -- Para pruebas locales, active SEED_DEMO_DATA=true.
+
+
+-- CATÁLOGOS OPERATIVOS ADMINISTRABLES
+CREATE TABLE IF NOT EXISTS catalogo_concesiones (
+  id SERIAL PRIMARY KEY,
+  zona VARCHAR(10) NOT NULL CHECK (zona IN ('NORTE','SUR')),
+  concesion VARCHAR(100) NOT NULL,
+  activo BOOLEAN DEFAULT true,
+  creado_en TIMESTAMP DEFAULT NOW(),
+  creado_por VARCHAR(50),
+  UNIQUE(zona, concesion)
+);
+
+CREATE TABLE IF NOT EXISTS catalogo_puestos (
+  id SERIAL PRIMARY KEY,
+  zona VARCHAR(10) NOT NULL CHECK (zona IN ('NORTE','SUR')),
+  concesion VARCHAR(100) NOT NULL,
+  puesto VARCHAR(100) NOT NULL,
+  activo BOOLEAN DEFAULT true,
+  creado_en TIMESTAMP DEFAULT NOW(),
+  creado_por VARCHAR(50),
+  UNIQUE(zona, concesion, puesto)
+);
+
+CREATE TABLE IF NOT EXISTS catalogo_placas (
+  id SERIAL PRIMARY KEY,
+  zona VARCHAR(10) NOT NULL CHECK (zona IN ('NORTE','SUR')),
+  concesion VARCHAR(100) NOT NULL,
+  puesto VARCHAR(100) NOT NULL,
+  placa VARCHAR(50) NOT NULL,
+  activo BOOLEAN DEFAULT true,
+  creado_en TIMESTAMP DEFAULT NOW(),
+  creado_por VARCHAR(50),
+  UNIQUE(zona, concesion, puesto, placa)
+);
+
+CREATE INDEX IF NOT EXISTS idx_novedades_estado ON novedades(estado);
+CREATE INDEX IF NOT EXISTS idx_catalogo_concesiones_zona ON catalogo_concesiones(zona);
+CREATE INDEX IF NOT EXISTS idx_catalogo_puestos_lookup ON catalogo_puestos(zona, concesion);
+CREATE INDEX IF NOT EXISTS idx_catalogo_placas_lookup ON catalogo_placas(zona, concesion, puesto);
