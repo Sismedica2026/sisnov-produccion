@@ -122,6 +122,9 @@ thead th{background:#294996;color:#fff;font-size:.63rem;text-transform:uppercase
 tbody tr{border-bottom:1px solid var(--border);transition:var(--t);}
 tbody tr:hover{background:rgba(255,255,255,.02);}
 td{padding:9px 12px;vertical-align:middle;}
+.hallazgo-cell{min-width:260px;max-width:360px;white-space:normal;line-height:1.25;color:var(--text);}
+.hallazgo-cell span{display:block;max-height:2.7em;overflow:hidden;}
+
 .tdm{color:var(--muted);font-size:.74rem;}
 /* BADGES */
 .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:.65rem;font-weight:700;letter-spacing:.3px;}
@@ -341,7 +344,7 @@ td{padding:9px 12px;vertical-align:middle;}
             <select class="si" style="width:135px;" onchange="fn2(this.value)"><option value="">Todos niveles</option><option>BAJA</option><option>MEDIA</option><option>CRITICA</option></select>
             <button class="btn btn-s btn-sm" onclick="exportCSV()" style="margin-left:auto">⬇ CSV</button>
           </div>
-          <div class="tw"><table><thead><tr><th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th><th>Área</th><th>Tipo</th><th>Nivel</th><th>Supervisor</th></tr></thead><tbody id="tbody"></tbody></table></div>
+          <div class="tw"><table><thead><tr><th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th><th>Área</th><th>Tipo</th><th>Nivel</th><th>Supervisor</th><th>Descripción del Hallazgo</th></tr></thead><tbody id="tbody"></tbody></table></div>
           <div style="margin-top:9px;font-size:.72rem;color:var(--muted)" id="tcount"></div>
         </div>
       </div>
