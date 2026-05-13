@@ -1630,3 +1630,140 @@ renderRep = async function() {
     if (typeof cambiarEstadoNovedad === 'function') cambiarEstadoNovedad(sel.dataset.id, sel.value);
   });
 })();
+
+
+// ============================================================
+// SISNOV — Ajuste puntual Dashboard Global: dona gestión/criticidad,
+// promedios en días y eliminación de paneles duplicados.
+// No modifica usuarios, contraseñas, base de datos ni Power BI.
+// ============================================================
+(function(){
+  if (typeof renderDash !== 'function') return;
+  const _renderDashDashboardGlobal = renderDash;
+
+  const escDash = (v) => String(v ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const num = (v) => Number(v || 0);
+  const toDias = (horas) => {
+    const h = Number(horas);
+    if (!Number.isFinite(h) || h <= 0) return '—';
+    const d = h / 24;
+    return d < 1 ? d.toFixed(2) : d.toFixed(1);
+  };
+
+  function isGlobalRole(){
+    return CU && ['admin','gerente'].includes(CU.rol);
+  }
+
+  function setCriticidadCardsVisible(visible){
+    ['s1','s2','s3'].forEach(id => {
+      const el = document.getElementById(id);
+      const card = el && el.closest('.sc');
+      if (card) card.style.display = visible ? '' : 'none';
+    });
+  }
+
+  function removeOldDuplicatedDashboardPanels(){
+    ['dash-estado-extra','dash-criticidad-extra','dash-gerencial-unico'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    });
+  }
+
+  function rowsToMap(rows, keyField){
+    const out = {};
+    (rows || []).forEach(r => {
+      const k = String(r[keyField] || 'SIN DATO').toUpperCase();
+      out[k] = num(r.total);
+    });
+    return out;
+  }
+
+  function donutHtml(title, subtitle, counts, palette){
+    const rows = Object.entries(counts).filter(([,v]) => num(v) > 0).sort((a,b)=>b[1]-a[1]);
+    const total = rows.reduce((a,[,v])=>a+num(v),0);
+    if (!total) {
+      return `<div class="dash-donut-box"><div class="ct2">${escDash(title)}</div><div class="tdm">Sin datos disponibles</div></div>`;
+    }
+    let acc = 0;
+    const parts = rows.map(([k,v], i) => {
+      const pct = num(v) / total * 100;
+      const start = acc; acc += pct;
+      const color = palette[k] || ['#294996','#e42421','#1a7a3c','#f0a832','#8b5cf6','#1abc9c'][i % 6];
+      return `${color} ${start.toFixed(2)}% ${acc.toFixed(2)}%`;
+    }).join(', ');
+    return `<div class="dash-donut-box">
+      <div class="ct2">${escDash(title)}</div>
+      <div class="tdm" style="margin-bottom:10px">${escDash(subtitle || '')}</div>
+      <div style="display:grid;grid-template-columns:138px 1fr;gap:16px;align-items:center">
+        <div style="width:132px;height:132px;border-radius:50%;background:conic-gradient(${parts});position:relative;margin:auto;box-shadow:0 8px 22px rgba(0,0,0,.08)">
+          <div style="position:absolute;inset:32px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;text-align:center;font-weight:900;color:var(--text);font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:.5px">${total}<br><span style="font-family:Outfit,sans-serif;font-size:.62rem;color:var(--muted);font-weight:700">total</span></div>
+        </div>
+        <div>${rows.map(([k,v], i) => {
+          const pct = (num(v) / total * 100).toFixed(1);
+          const color = palette[k] || ['#294996','#e42421','#1a7a3c','#f0a832','#8b5cf6','#1abc9c'][i % 6];
+          return `<div style="display:grid;grid-template-columns:12px 1fr auto auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
+            <span style="width:10px;height:10px;border-radius:50%;background:${color};display:inline-block"></span>
+            <span style="font-size:.76rem;font-weight:800;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escDash(k)}">${escDash(k)}</span>
+            <span class="tdm">${v}</span>
+            <span class="badge b-area">${pct}%</span>
+          </div>`;
+        }).join('')}</div>
+      </div>
+    </div>`;
+  }
+
+  async function renderDashboardGlobalUnico(){
+    const page = document.getElementById('pg-dashboard');
+    if (!page) return;
+
+    removeOldDuplicatedDashboardPanels();
+
+    if (!isGlobalRole()) {
+      setCriticidadCardsVisible(true);
+      return;
+    }
+
+    // Evita duplicar la misma información: los conteos CRÍTICA/MEDIA/BAJA
+    // quedan resumidos en la dona de criticidad.
+    setCriticidadCardsVisible(false);
+
+    const anchor = page.querySelector('.sg') || page.querySelector('.pgt');
+    if (!anchor) return;
+
+    const panel = document.createElement('div');
+    panel.id = 'dash-gerencial-unico';
+    panel.className = 'card';
+    panel.style.marginTop = '14px';
+    panel.innerHTML = `<div class="ch"><div class="ct2">📊 Dashboard gerencial consolidado</div><div class="tdm">Gestión, criticidad y tiempos promedio sin información repetida</div></div>
+      <div style="padding:10px;color:var(--muted);font-size:.82rem">Cargando indicadores...</div>`;
+    anchor.after(panel);
+
+    try {
+      const data = await API.get('/api/reportes/resumen');
+      const estadoCounts = rowsToMap(data.porEstado, 'estado');
+      const criticidadCounts = rowsToMap(data.porNivel, 'nivel');
+      const t = data.tiemposCierre || {};
+      const diasPromCierre = toDias(t.horas_promedio_cierre);
+      const diasPromAbiertas = toDias(t.horas_promedio_abiertas);
+
+      panel.innerHTML = `<div class="ch"><div class="ct2">📊 Dashboard gerencial consolidado</div><div class="tdm">Gestión, criticidad y tiempos promedio</div></div>
+        <div class="g3" style="margin-bottom:16px">
+          <div><div class="sl">Días prom. abiertas</div><div class="sv vr">${escDash(diasPromAbiertas)}</div><div class="ss">promedio en días, no horas</div></div>
+          <div><div class="sl">Días prom. cierre</div><div class="sv vgr">${escDash(diasPromCierre)}</div><div class="ss">solo novedades cerradas</div></div>
+          <div><div class="sl">Cerradas</div><div class="sv vb">${escDash(t.cerradas || 0)}</div><div class="ss">novedades con cierre registrado</div></div>
+        </div>
+        <div class="g2" style="align-items:start">
+          ${donutHtml('🍩 Estado de gestión', 'Participación porcentual: abiertas, gestión y cerradas', estadoCounts, {ABIERTA:'#e42421',GESTION:'#f0a832',CERRADA:'#1a7a3c'})}
+          ${donutHtml('🍩 Criticidades', 'Participación porcentual por criticidad', criticidadCounts, {CRITICA:'#e42421',MEDIA:'#f0a832',BAJA:'#1a7a3c'})}
+        </div>`;
+    } catch(e) {
+      panel.innerHTML = `<div class="ch"><div class="ct2">📊 Dashboard gerencial consolidado</div></div><div style="padding:12px;color:var(--red);font-size:.82rem">No fue posible cargar los indicadores gerenciales: ${escDash(e.message || 'error')}</div>`;
+    }
+  }
+
+  renderDash = async function(){
+    await _renderDashDashboardGlobal.apply(this, arguments);
+    await renderDashboardGlobalUnico();
+  };
+  window.renderDash = renderDash;
+})();
