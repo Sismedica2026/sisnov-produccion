@@ -140,14 +140,13 @@ function publicUser(user, concesiones = []) {
     nombre: user.nombre,
     rol: user.rol,
     zona: user.zona,
-    must_change_password: !!user.must_change_password,
     concesiones
   };
 }
 
 function signToken(user) {
   return jwt.sign(
-    { username: user.username, nombre: user.nombre, rol: user.rol, zona: user.zona, must_change_password: !!user.must_change_password },
+    { username: user.username, nombre: user.nombre, rol: user.rol, zona: user.zona },
     JWT_SECRET,
     { expiresIn: TOKEN_TTL, issuer: 'sisnov', audience: 'sisnov-web' }
   );
@@ -206,7 +205,7 @@ async function auth(req, res, next) {
   try {
     const payload = jwt.verify(token, JWT_SECRET, { issuer: 'sisnov', audience: 'sisnov-web' });
     const result = await pool.query(
-      'SELECT username, nombre, rol, zona, activo, must_change_password FROM usuarios WHERE username = $1',
+      'SELECT username, nombre, rol, zona, activo FROM usuarios WHERE username = $1',
       [payload.username]
     );
     const dbUser = result.rows[0];
@@ -315,8 +314,8 @@ async function bootstrapInitialUsers() {
 
   for (const user of INITIAL_USERS) {
     const result = await pool.query(
-      `INSERT INTO usuarios (username, password_hash, nombre, rol, zona, activo, must_change_password)
-       VALUES ($1,$2,$3,$4,$5,true,true)
+      `INSERT INTO usuarios (username, password_hash, nombre, rol, zona, activo)
+       VALUES ($1,$2,$3,$4,$5,true)
        ON CONFLICT (username) DO NOTHING
        RETURNING username`,
       [user.username, hash, user.nombre, user.rol, user.zona]
@@ -333,7 +332,6 @@ async function bootstrapInitialUsers() {
              rol = $4,
              zona = $5,
              activo = true,
-             must_change_password = true,
              actualizado_en = NOW()
          WHERE LOWER(TRIM(username)) = LOWER(TRIM($1))`,
         [user.username, hash, user.nombre, user.rol, user.zona]
@@ -347,15 +345,14 @@ async function bootstrapInitialUsers() {
   if (resetInitialUsers) {
     for (const admin of INITIAL_USERS.filter(u => ['admin1', 'admin2'].includes(u.username))) {
       await pool.query(
-        `INSERT INTO usuarios (username, password_hash, nombre, rol, zona, activo, must_change_password)
-         VALUES ($1,$2,$3,$4,$5,true,true)
+        `INSERT INTO usuarios (username, password_hash, nombre, rol, zona, activo)
+         VALUES ($1,$2,$3,$4,$5,true)
          ON CONFLICT (username)
          DO UPDATE SET password_hash = EXCLUDED.password_hash,
                        nombre = EXCLUDED.nombre,
                        rol = EXCLUDED.rol,
                        zona = EXCLUDED.zona,
                        activo = true,
-                       must_change_password = true,
                        actualizado_en = NOW()`,
         [admin.username, hash, admin.nombre, admin.rol, admin.zona]
       );
@@ -377,57 +374,9 @@ async function bootstrapInitialUsers() {
   console.log(`✅ Bootstrap de usuarios listo. Usuarios creados ahora: ${created}.${resetMsg} Total usuarios: ${total.rows[0].total}.`);
 }
 
-
-
-async function ensureMigrations() {
-  await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT true`);
-  await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA' CHECK (estado IN ('ABIERTA','GESTION','CERRADA'))`);
-  await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS gestion_detalle TEXT`);
-  await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS gestionado_por VARCHAR(50)`);
-  await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS cerrado_en TIMESTAMP`);
-  await pool.query(`ALTER TABLE catalogo_placas ADD COLUMN IF NOT EXISTS desactivado_en TIMESTAMP`);
-  await pool.query(`ALTER TABLE catalogo_placas ADD COLUMN IF NOT EXISTS desactivado_por VARCHAR(50)`);
-  await pool.query(`ALTER TABLE catalogo_placas ADD COLUMN IF NOT EXISTS motivo_cambio TEXT`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_novedades_estado ON novedades(estado)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_novedades_cierre ON novedades(creado_en, cerrado_en)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalogo_placas_activo ON catalogo_placas(zona, concesion, puesto, activo)`);
-}
-
-
-async function seedDefaultCatalog() {
-  const count = await pool.query('SELECT COUNT(*)::int AS total FROM catalogo_concesiones');
-  if (count.rows[0].total > 0) return;
-  const file = path.join(__dirname, '../db/default_catalog.json');
-  if (!fs.existsSync(file)) return;
-  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  for (const [zona, concesiones] of Object.entries(data.CAT || {})) {
-    for (const [concesion, puestos] of Object.entries(concesiones || {})) {
-      await pool.query(
-        `INSERT INTO catalogo_concesiones (zona, concesion, creado_por) VALUES ($1,$2,$3) ON CONFLICT (zona, concesion) DO NOTHING`,
-        [zona, concesion, 'bootstrap']
-      );
-      for (const puesto of puestos || []) {
-        await pool.query(
-          `INSERT INTO catalogo_puestos (zona, concesion, puesto, creado_por) VALUES ($1,$2,$3,$4) ON CONFLICT (zona, concesion, puesto) DO NOTHING`,
-          [zona, concesion, puesto, 'bootstrap']
-        );
-        for (const placa of ((data.MOV || {})[`${concesion}|${puesto}`] || [])) {
-          await pool.query(
-            `INSERT INTO catalogo_placas (zona, concesion, puesto, placa, creado_por) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (zona, concesion, puesto, placa) DO NOTHING`,
-            [zona, concesion, puesto, placa, 'bootstrap']
-          );
-        }
-      }
-    }
-  }
-  console.log('✅ Catálogo operativo inicializado');
-}
-
 async function initDB() {
   const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
   await pool.query(schema);
-  await ensureMigrations();
-  await seedDefaultCatalog();
 
   if (process.env.SEED_DEMO_DATA === 'true') {
     const seed = fs.readFileSync(path.join(__dirname, '../db/seed_demo.sql'), 'utf8');
@@ -487,28 +436,6 @@ app.post('/api/auth/logout', auth, async (req, res) => {
   clearSessionCookies(res);
   res.json({ ok: true });
 });
-
-app.post('/api/auth/change-password', auth, async (req, res) => {
-  const currentPassword = typeof req.body.currentPassword === 'string' ? req.body.currentPassword : '';
-  const newPassword = typeof req.body.newPassword === 'string' ? req.body.newPassword : '';
-  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Contraseña actual y nueva contraseña son requeridas' });
-  if (!strongPassword(newPassword)) return res.status(400).json({ error: `Contraseña débil. Use mínimo ${MIN_PASSWORD_LENGTH} caracteres y 3 tipos: mayúsculas, minúsculas, números o símbolos.` });
-  try {
-    const result = await pool.query('SELECT password_hash FROM usuarios WHERE username=$1', [req.user.username]);
-    const valid = result.rows[0] && await bcrypt.compare(currentPassword, result.rows[0].password_hash);
-    if (!valid) return res.status(401).json({ error: 'La contraseña actual no es correcta' });
-    const same = await bcrypt.compare(newPassword, result.rows[0].password_hash);
-    if (same) return res.status(400).json({ error: 'La nueva contraseña no puede ser igual a la actual' });
-    const hash = await bcrypt.hash(newPassword, 12);
-    await pool.query('UPDATE usuarios SET password_hash=$1, must_change_password=false, actualizado_en=NOW() WHERE username=$2', [hash, req.user.username]);
-    await logAudit(req.user.username, req.user.rol, 'CAMBIO_PASS_PROPIO', 'Usuario cambió su propia contraseña', req.ip);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('Change password error:', e);
-    res.status(500).json({ error: 'Error al cambiar contraseña' });
-  }
-});
-
 
 // ============================================================
 // RUTAS NOVEDADES
@@ -599,32 +526,6 @@ app.post('/api/novedades', auth, requireRoles('admin','coordinador-norte','coord
   }
 });
 
-
-
-app.patch('/api/novedades/:id/estado', auth, async (req, res) => {
-  const id = Number(req.params.id);
-  const estado = sanitizeText(req.body.estado || '', 20).toUpperCase();
-  const detalle = sanitizeText(req.body.detalle || '', 500);
-  if (!id || !validEnum(estado, ['ABIERTA','GESTION','CERRADA'])) return res.status(400).json({ error: 'Estado inválido' });
-  try {
-    const current = await pool.query('SELECT * FROM novedades WHERE id=$1', [id]);
-    const novedad = current.rows[0];
-    if (!novedad) return res.status(404).json({ error: 'Novedad no encontrada' });
-    if (req.user.rol === 'supervisor' && novedad.registrado_por !== req.user.username) return res.status(403).json({ error: 'Sin permisos para esta novedad' });
-    if (['director-norte','coordinador-norte'].includes(req.user.rol) && novedad.zona !== 'NORTE') return res.status(403).json({ error: 'Sin permisos para esta zona' });
-    if (['director-sur','coordinador-sur'].includes(req.user.rol) && novedad.zona !== 'SUR') return res.status(403).json({ error: 'Sin permisos para esta zona' });
-    const result = await pool.query(
-      `UPDATE novedades SET estado=$1, gestion_detalle=$2, gestionado_por=$3, cerrado_en=CASE WHEN $1='CERRADA' THEN NOW() ELSE cerrado_en END WHERE id=$4 RETURNING *`,
-      [estado, detalle || null, req.user.username, id]
-    );
-    await logAudit(req.user.username, req.user.rol, 'ESTADO_NOVEDAD', `Novedad #${id} cambió a ${estado}`, req.ip);
-    res.json({ novedad: result.rows[0] });
-  } catch (e) {
-    console.error('Estado novedad error:', e);
-    res.status(500).json({ error: 'Error al actualizar estado' });
-  }
-});
-
 app.get('/api/novedades/hoy', auth, async (req, res) => {
   try {
     const { rol } = req.user;
@@ -667,131 +568,6 @@ app.get('/api/novedades/hoy', auth, async (req, res) => {
   } catch (e) {
     console.error('GET hoy error:', e);
     res.status(500).json({ error: 'Error al obtener control diario' });
-  }
-});
-
-
-
-// ============================================================
-// RUTAS CATÁLOGOS OPERATIVOS (solo admin modifica)
-// ============================================================
-app.get('/api/catalogos', auth, async (req, res) => {
-  try {
-    const [cons, puestos, placas] = await Promise.all([
-      pool.query(`SELECT zona, concesion FROM catalogo_concesiones WHERE activo=true ORDER BY zona, concesion`),
-      pool.query(`SELECT zona, concesion, puesto FROM catalogo_puestos WHERE activo=true ORDER BY zona, concesion, puesto`),
-      pool.query(`SELECT zona, concesion, puesto, placa FROM catalogo_placas WHERE activo=true ORDER BY zona, concesion, puesto, placa`)
-    ]);
-    const CAT = { NORTE: {}, SUR: {} };
-    const MOV = {};
-    cons.rows.forEach(r => { if (!CAT[r.zona]) CAT[r.zona] = {}; CAT[r.zona][r.concesion] = CAT[r.zona][r.concesion] || []; });
-    puestos.rows.forEach(r => { if (!CAT[r.zona]) CAT[r.zona] = {}; CAT[r.zona][r.concesion] = CAT[r.zona][r.concesion] || []; if (!CAT[r.zona][r.concesion].includes(r.puesto)) CAT[r.zona][r.concesion].push(r.puesto); });
-    placas.rows.forEach(r => { const key = `${r.concesion}|${r.puesto}`; MOV[key] = MOV[key] || []; if (!MOV[key].includes(r.placa)) MOV[key].push(r.placa); });
-    res.json({ CAT, MOV });
-  } catch (e) {
-    console.error('Catalogos error:', e);
-    res.status(500).json({ error: 'Error al obtener catálogos' });
-  }
-});
-
-app.post('/api/catalogos/concesiones', auth, requireRoles('admin'), async (req, res) => {
-  const zona = sanitizeText(req.body.zona || '', 10).toUpperCase();
-  const concesion = sanitizeText(req.body.concesion || '', 100).toUpperCase();
-  if (!validEnum(zona, ['NORTE','SUR']) || !concesion) return res.status(400).json({ error: 'Zona y concesión requeridas' });
-  await pool.query(`INSERT INTO catalogo_concesiones (zona, concesion, creado_por) VALUES ($1,$2,$3) ON CONFLICT (zona, concesion) DO UPDATE SET activo=true`, [zona, concesion, req.user.username]);
-  await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Agregó concesión ${concesion} (${zona})`, req.ip);
-  res.json({ ok: true });
-});
-app.delete('/api/catalogos/concesiones/:zona/:concesion', auth, requireRoles('admin'), async (req, res) => {
-  const zona = sanitizeText(req.params.zona || '', 10).toUpperCase();
-  const concesion = sanitizeText(decodeURIComponent(req.params.concesion || ''), 100);
-  await pool.query(`UPDATE catalogo_concesiones SET activo=false WHERE zona=$1 AND concesion=$2`, [zona, concesion]);
-  await pool.query(`UPDATE catalogo_puestos SET activo=false WHERE zona=$1 AND concesion=$2`, [zona, concesion]);
-  await pool.query(`UPDATE catalogo_placas SET activo=false WHERE zona=$1 AND concesion=$2`, [zona, concesion]);
-  await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Eliminó concesión ${concesion} (${zona})`, req.ip);
-  res.json({ ok: true });
-});
-app.post('/api/catalogos/puestos', auth, requireRoles('admin'), async (req, res) => {
-  const zona = sanitizeText(req.body.zona || '', 10).toUpperCase();
-  const concesion = sanitizeText(req.body.concesion || '', 100).toUpperCase();
-  const puesto = sanitizeText(req.body.puesto || '', 100).toUpperCase();
-  if (!validEnum(zona, ['NORTE','SUR']) || !concesion || !puesto) return res.status(400).json({ error: 'Zona, concesión y puesto requeridos' });
-  await pool.query(`INSERT INTO catalogo_concesiones (zona, concesion, creado_por) VALUES ($1,$2,$3) ON CONFLICT (zona, concesion) DO UPDATE SET activo=true`, [zona, concesion, req.user.username]);
-  await pool.query(`INSERT INTO catalogo_puestos (zona, concesion, puesto, creado_por) VALUES ($1,$2,$3,$4) ON CONFLICT (zona, concesion, puesto) DO UPDATE SET activo=true`, [zona, concesion, puesto, req.user.username]);
-  await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Agregó puesto ${puesto} en ${concesion}`, req.ip);
-  res.json({ ok: true });
-});
-app.delete('/api/catalogos/puestos/:zona/:concesion/:puesto', auth, requireRoles('admin'), async (req, res) => {
-  const zona = sanitizeText(req.params.zona || '', 10).toUpperCase();
-  const concesion = sanitizeText(decodeURIComponent(req.params.concesion || ''), 100);
-  const puesto = sanitizeText(decodeURIComponent(req.params.puesto || ''), 100);
-  await pool.query(`UPDATE catalogo_puestos SET activo=false WHERE zona=$1 AND concesion=$2 AND puesto=$3`, [zona, concesion, puesto]);
-  await pool.query(`UPDATE catalogo_placas SET activo=false WHERE zona=$1 AND concesion=$2 AND puesto=$3`, [zona, concesion, puesto]);
-  await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Eliminó puesto ${puesto} en ${concesion}`, req.ip);
-  res.json({ ok: true });
-});
-app.post('/api/catalogos/placas', auth, requireRoles('admin'), async (req, res) => {
-  const zona = sanitizeText(req.body.zona || '', 10).toUpperCase();
-  const concesion = sanitizeText(req.body.concesion || '', 100).toUpperCase();
-  const puesto = sanitizeText(req.body.puesto || '', 100).toUpperCase();
-  const placa = sanitizeText(req.body.placa || '', 50).toUpperCase();
-  if (!validEnum(zona, ['NORTE','SUR']) || !concesion || !puesto || !placa) return res.status(400).json({ error: 'Zona, concesión, puesto y placa requeridos' });
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query(`INSERT INTO catalogo_concesiones (zona, concesion, creado_por) VALUES ($1,$2,$3) ON CONFLICT (zona, concesion) DO UPDATE SET activo=true`, [zona, concesion, req.user.username]);
-    await client.query(`INSERT INTO catalogo_puestos (zona, concesion, puesto, creado_por) VALUES ($1,$2,$3,$4) ON CONFLICT (zona, concesion, puesto) DO UPDATE SET activo=true`, [zona, concesion, puesto, req.user.username]);
-
-    // Regla empresarial: por puesto debe existir una sola placa ACTIVA.
-    // Las anteriores se conservan como histórico inactivo.
-    await client.query(`
-      UPDATE catalogo_placas
-      SET activo=false, desactivado_en=NOW(), desactivado_por=$5, motivo_cambio='REEMPLAZO_PLACA'
-      WHERE zona=$1 AND concesion=$2 AND puesto=$3 AND activo=true AND placa <> $4
-    `, [zona, concesion, puesto, placa, req.user.username]);
-
-    await client.query(`
-      INSERT INTO catalogo_placas (zona, concesion, puesto, placa, activo, creado_por)
-      VALUES ($1,$2,$3,$4,true,$5)
-      ON CONFLICT (zona, concesion, puesto, placa)
-      DO UPDATE SET activo=true, desactivado_en=NULL, desactivado_por=NULL, motivo_cambio=NULL
-    `, [zona, concesion, puesto, placa, req.user.username]);
-
-    await client.query('COMMIT');
-    await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Actualizó placa activa ${placa} en ${concesion}/${puesto}. Histórico conservado.`, req.ip);
-    res.json({ ok: true });
-  } catch (e) {
-    await client.query('ROLLBACK');
-    console.error('Add placa error:', e);
-    res.status(500).json({ error: 'Error al actualizar placa' });
-  } finally {
-    client.release();
-  }
-});
-app.delete('/api/catalogos/placas/:zona/:concesion/:puesto/:placa', auth, requireRoles('admin'), async (req, res) => {
-  const zona = sanitizeText(req.params.zona || '', 10).toUpperCase();
-  const concesion = sanitizeText(decodeURIComponent(req.params.concesion || ''), 100);
-  const puesto = sanitizeText(decodeURIComponent(req.params.puesto || ''), 100);
-  const placa = sanitizeText(decodeURIComponent(req.params.placa || ''), 50);
-  await pool.query(`UPDATE catalogo_placas SET activo=false, desactivado_en=NOW(), desactivado_por=$5, motivo_cambio='ELIMINACION_ADMIN' WHERE zona=$1 AND concesion=$2 AND puesto=$3 AND placa=$4`, [zona, concesion, puesto, placa, req.user.username]);
-  await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Eliminó placa ${placa} en ${concesion}/${puesto}`, req.ip);
-  res.json({ ok: true });
-});
-
-app.get('/api/catalogos/placas/historial', auth, requireRoles('admin','gerente'), async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT zona, concesion, puesto, placa, activo, creado_por, desactivado_por, motivo_cambio,
-             TO_CHAR(creado_en AT TIME ZONE 'America/Bogota','DD/MM/YYYY HH24:MI:SS') AS creado_en_formato,
-             TO_CHAR(desactivado_en AT TIME ZONE 'America/Bogota','DD/MM/YYYY HH24:MI:SS') AS desactivado_en_formato
-      FROM catalogo_placas
-      ORDER BY zona, concesion, puesto, activo DESC, creado_en DESC
-    `);
-    res.json({ placas: result.rows });
-  } catch (e) {
-    console.error('Historial placas error:', e);
-    res.status(500).json({ error: 'Error al obtener historial de placas' });
   }
 });
 
@@ -906,98 +682,23 @@ app.get('/api/reportes/resumen', auth, async (req, res) => {
     if (rol === 'director-norte' || rol === 'coordinador-norte') zFilter = "AND zona='NORTE'";
     else if (rol === 'director-sur' || rol === 'coordinador-sur') zFilter = "AND zona='SUR'";
 
-    const [totales, porArea, porNivel, porEstado, porZona, porCon, porCriticidadDetalle, tiemposCierre] = await Promise.all([
+    const [totales, porArea, porNivel, porZona, porCon] = await Promise.all([
       pool.query(`SELECT COUNT(*) as total, zona FROM novedades WHERE 1=1 ${zFilter} GROUP BY zona`),
       pool.query(`SELECT area, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY area ORDER BY total DESC`),
       pool.query(`SELECT nivel, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY nivel`),
-      pool.query(`SELECT estado, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY estado`),
       pool.query(`SELECT zona, COUNT(*) as total FROM novedades GROUP BY zona`),
-      pool.query(`SELECT concesion, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY concesion ORDER BY total DESC LIMIT 10`),
-      pool.query(`
-        SELECT nivel, area, tipo_novedad, estado, COUNT(*)::int AS total
-        FROM novedades
-        WHERE 1=1 ${zFilter}
-        GROUP BY nivel, area, tipo_novedad, estado
-        ORDER BY CASE nivel WHEN 'CRITICA' THEN 1 WHEN 'MEDIA' THEN 2 ELSE 3 END, total DESC
-        LIMIT 30
-      `),
-      pool.query(`
-        SELECT
-          COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas,
-          ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en - creado_en))/3600) FILTER (WHERE estado='CERRADA' AND cerrado_en IS NOT NULL), 2) AS horas_promedio_cierre,
-          ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - creado_en))/3600) FILTER (WHERE estado <> 'CERRADA'), 2) AS horas_promedio_abiertas
-        FROM novedades
-        WHERE 1=1 ${zFilter}
-      `)
+      pool.query(`SELECT concesion, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY concesion ORDER BY total DESC LIMIT 10`)
     ]);
 
     res.json({
       totales: totales.rows,
       porArea: porArea.rows,
       porNivel: porNivel.rows,
-      porEstado: porEstado.rows,
       porZona: porZona.rows,
-      porConcesion: porCon.rows,
-      porCriticidadDetalle: porCriticidadDetalle.rows,
-      tiemposCierre: tiemposCierre.rows[0] || {}
+      porConcesion: porCon.rows
     });
   } catch {
     res.status(500).json({ error: 'Error al obtener reportes' });
-  }
-});
-
-
-// ============================================================
-// RUTA POWER BI / BI GERENCIAL
-// ============================================================
-app.get('/api/bi/kpis', async (req, res) => {
-  // Compatibilidad BI empresarial:
-  // - Power BI Web.Contents con encabezado: x-api-key
-  // - Integraciones previas: x-bi-token
-  // - Authorization: Bearer <token>
-  // - Authorization: <token>
-  // - Query string opcional: ?api_key=<token> o ?token=<token>
-  const authHeader = req.get('authorization') || '';
-  const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
-    ? authHeader.slice(7).trim()
-    : authHeader.trim();
-  const token = req.get('x-api-key')
-    || req.get('x-bi-token')
-    || bearerToken
-    || req.query.api_key
-    || req.query.token;
-
-  if (!process.env.BI_API_TOKEN || token !== process.env.BI_API_TOKEN) {
-    return res.status(401).json({ error: 'Token BI inválido' });
-  }
-  try {
-    const [base, criticidades, responsables, concesiones, cierres] = await Promise.all([
-      pool.query(`
-        SELECT id, zona, concesion, puesto, movil, area, tipo_novedad, nivel, estado,
-               registrado_por, nombre_supervisor,
-               creado_en,
-               cerrado_en,
-               ROUND(EXTRACT(EPOCH FROM (COALESCE(cerrado_en, NOW()) - creado_en))/3600, 2) AS horas_transcurridas,
-               CASE WHEN estado='CERRADA' THEN ROUND(EXTRACT(EPOCH FROM (cerrado_en - creado_en))/3600, 2) END AS horas_cierre
-        FROM novedades
-        ORDER BY creado_en DESC
-      `),
-      pool.query(`SELECT nivel, area, tipo_novedad, estado, COUNT(*)::int AS total FROM novedades GROUP BY nivel, area, tipo_novedad, estado ORDER BY total DESC`),
-      pool.query(`SELECT registrado_por, nombre_supervisor, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre FROM novedades GROUP BY registrado_por, nombre_supervisor ORDER BY total DESC`),
-      pool.query(`SELECT zona, concesion, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE nivel='CRITICA')::int AS criticas, COUNT(*) FILTER (WHERE estado<>'CERRADA')::int AS abiertas FROM novedades GROUP BY zona, concesion ORDER BY total DESC`),
-      pool.query(`SELECT DATE_TRUNC('day', creado_en)::date AS fecha, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre FROM novedades GROUP BY DATE_TRUNC('day', creado_en)::date ORDER BY fecha DESC`)
-    ]);
-    res.json({
-      generado_en: new Date().toISOString(),
-      novedades: base.rows,
-      criticidades: criticidades.rows,
-      responsables: responsables.rows,
-      concesiones: concesiones.rows,
-      cierres_diarios: cierres.rows
-    });
-  } catch (e) {
-    console.error('BI KPIs error:', e);
-    res.status(500).json({ error: 'Error al generar KPIs BI' });
   }
 });
 
