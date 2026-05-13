@@ -239,9 +239,15 @@ td{padding:9px 12px;vertical-align:middle;}
       <button class="lbtn" onclick="doLogin()">Ingresar al Sistema →</button>
       <div class="lfooter">🔒 Sesión cifrada · Auditada · ISO 27001 · Ley 1581 Colombia</div>
     </div>
-    <div class="lhint"><b>Acceso seguro:</b><br>
-      Use únicamente las credenciales asignadas por el administrador del sistema.<br>
-      Por seguridad, las credenciales de prueba fueron retiradas de la interfaz pública.
+    <div class="lhint"><b>Credenciales de prueba:</b><br>
+      <b>admin1</b> / admin123 <span class="rbs" style="background:rgba(228,36,33,.2);color:#e42421">ADMIN</span> &nbsp;
+      <b>admin2</b> / admin123 <span class="rbs" style="background:rgba(228,36,33,.2);color:#e42421">ADMIN</span><br>
+      <b>gerente</b> / gerente123 <span class="rbs" style="background:rgba(240,168,50,.2);color:var(--gold)">GERENTE</span><br>
+      <b>dir.norte</b> / norte123 <span class="rbs" style="background:rgba(41,73,150,.2);color:#294996">DIR NORTE</span> &nbsp;
+      <b>dir.sur</b> / sur123 <span class="rbs" style="background:rgba(90,110,154,.2);color:#5a6e9a">DIR SUR</span><br>
+      <b>coord.norte</b> / cnorte123 <span class="rbs" style="background:rgba(14,122,78,.2);color:#0e7a4e">COORD NORTE</span> &nbsp;
+      <b>coord.sur</b> / csur123 <span class="rbs" style="background:rgba(14,122,78,.2);color:#0e7a4e">COORD SUR</span><br>
+      <b>sup01</b>–<b>sup20</b> / sup123 <span class="rbs" style="background:rgba(26,122,60,.2);color:#1a7a3c">SUPERVISOR</span>
     </div>
   </div>
 </div>
@@ -341,7 +347,7 @@ td{padding:9px 12px;vertical-align:middle;}
             <select class="si" style="width:135px;" onchange="fn2(this.value)"><option value="">Todos niveles</option><option>BAJA</option><option>MEDIA</option><option>CRITICA</option></select>
             <button class="btn btn-s btn-sm" onclick="exportCSV()" style="margin-left:auto">⬇ CSV</button>
           </div>
-          <div class="tw"><table><thead><tr><th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th><th>Área</th><th>Tipo</th><th>Nivel / Estado</th><th>Supervisor</th><th>Gestión</th></tr></thead><tbody id="tbody"></tbody></table></div>
+          <div class="tw"><table><thead><tr><th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th><th>Área</th><th>Tipo</th><th>Nivel</th><th>Supervisor</th></tr></thead><tbody id="tbody"></tbody></table></div>
           <div style="margin-top:9px;font-size:.72rem;color:var(--muted)" id="tcount"></div>
         </div>
       </div>

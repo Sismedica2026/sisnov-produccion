@@ -1,7 +1,6 @@
 // ============================================================
 // SEGUIMIENTO NOVEDADES OPERATIVAS - Sismedica SAS
 // Cliente JavaScript — conecta con API backend
-// CSP legacy event compatibility: server permits script-src-attr for existing HTML handlers
 // ============================================================
 
 // ── CONSTANTS ─────────────────────────────────────────────
@@ -434,8 +433,11 @@ function renderTbl() {
   if (fNv) data=data.filter(n=>n.nivel===fNv);
   document.getElementById('tcount').textContent=`Mostrando ${data.length} novedad(es)`;
   const tb=document.getElementById('tbody');
-  if (!data.length) { tb.innerHTML=`<tr><td colspan="9">${empty('📋','No hay registros que coincidan.')}</td></tr>`; return; }
-  tb.innerHTML=data.map(n=>`<tr>
+  if (!data.length) { tb.innerHTML=`<tr><td colspan="10">${empty('📋','No hay registros que coincidan.')}</td></tr>`; return; }
+  tb.innerHTML=data.map(n=>{
+    const hallazgo=(n.descripcion||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const corto=hallazgo.length>70 ? hallazgo.slice(0,70)+'…' : hallazgo;
+    return `<tr>
     <td style="font-weight:700;color:var(--muted)">#${n.id}</td>
     <td class="tdm" style="white-space:nowrap;font-size:.72rem">${n.fecha}</td>
     <td><span class="badge b-${n.zona?.toLowerCase()==='norte'?'norte':'sur'}">${n.zona}</span></td>
@@ -444,8 +446,9 @@ function renderTbl() {
     <td><span class="badge b-area">${n.area}</span></td>
     <td class="tdm">${n.tipo}</td>
     <td><span class="badge b-${n.nivel.toLowerCase()}">${n.nivel}</span></td>
+    <td class="tdm" title="${hallazgo}" style="max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${corto||'—'}</td>
     <td class="tdm">${n.name}</td>
-  </tr>`).join('');
+  </tr>`}).join('');
 }
 function fh(v) { fBq=v; renderTbl(); }
 function fa2(v) { fAr=v; renderTbl(); }
@@ -746,290 +749,3 @@ function countdown() {
 }
 document.addEventListener('mousemove', ()=>{if(CU)resetIA();});
 document.addEventListener('keydown', ()=>{if(CU)resetIA();});
-
-
-// ============================================================
-// ACTUALIZACIÓN OPERATIVA: estados, catálogos, clave inicial y dashboard
-// ============================================================
-async function cargarCatalogos() {
-  try {
-    const data = await API.get('/api/catalogos');
-    if (data.CAT) {
-      Object.keys(CAT).forEach(k => delete CAT[k]);
-      Object.assign(CAT, data.CAT);
-    }
-    if (data.MOV) {
-      Object.keys(MOV).forEach(k => delete MOV[k]);
-      Object.assign(MOV, data.MOV);
-    }
-  } catch (e) { console.warn('Catálogo remoto no disponible, usando catálogo local:', e.message); }
-}
-
-function ensureUpgradePages() {
-  if (!document.getElementById('pg-catalogos')) {
-    const content = document.querySelector('.content');
-    const page = document.createElement('div');
-    page.className = 'page'; page.id = 'pg-catalogos';
-    page.innerHTML = `
-      <div class="pgt">Catálogos Operativos</div>
-      <div class="pgs">Administración de concesiones, puestos de trabajo y placas/UM utilizadas en el registro de novedades.</div>
-      <div class="g3">
-        <div class="card"><div class="ct2">➕ Concesión</div><div class="fg" style="margin-top:12px"><label>Zona</label><select id="cat-zona"><option>NORTE</option><option>SUR</option></select></div><div class="fg"><label>Concesión</label><input id="cat-con" placeholder="Nombre de concesión"></div><button class="btn btn-p" onclick="addCatalogCon()">Agregar concesión</button></div>
-        <div class="card"><div class="ct2">➕ Puesto de trabajo</div><div class="fg" style="margin-top:12px"><label>Zona</label><select id="cat-zona-p" onchange="buildCatSelects()"><option>NORTE</option><option>SUR</option></select></div><div class="fg"><label>Concesión</label><select id="cat-con-p"></select></div><div class="fg"><label>Puesto</label><input id="cat-puesto" placeholder="Nombre del puesto"></div><button class="btn btn-p" onclick="addCatalogPuesto()">Agregar puesto</button></div>
-        <div class="card"><div class="ct2">➕ Placa / UM</div><div class="fg" style="margin-top:12px"><label>Zona</label><select id="cat-zona-m" onchange="buildCatSelects()"><option>NORTE</option><option>SUR</option></select></div><div class="fg"><label>Concesión</label><select id="cat-con-m" onchange="buildCatSelects()"></select></div><div class="fg"><label>Puesto</label><select id="cat-puesto-m"></select></div><div class="fg"><label>Placa / móvil</label><input id="cat-placa" placeholder="UM123 ABC456"></div><button class="btn btn-p" onclick="addCatalogPlaca()">Agregar placa</button></div>
-      </div>
-      <div class="card"><div class="ch"><div class="ct2">📚 Catálogo actual</div><button class="btn btn-s btn-sm" onclick="renderCatalogos()">Actualizar</button></div><div id="catalog-list"></div></div>`;
-    content.appendChild(page);
-  }
-  if (!document.getElementById('pwd-modal')) {
-    const modal = document.createElement('div');
-    modal.id = 'pwd-modal';
-    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:2000;background:rgba(13,27,62,.55);align-items:center;justify-content:center;padding:20px';
-    modal.innerHTML = `<div class="card" style="max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25)"><div class="pgt" style="font-size:1.35rem">Cambio obligatorio de contraseña</div><div class="pgs">Por seguridad, debe cambiar la contraseña inicial antes de continuar.</div><div id="pwd-err" class="alert aerr"></div><div id="pwd-ok" class="alert aok"></div><div class="fg"><label>Contraseña actual</label><input id="pwd-current" type="password"></div><div class="fg"><label>Nueva contraseña</label><input id="pwd-new" type="password"></div><div class="fg"><label>Confirmar nueva contraseña</label><input id="pwd-confirm" type="password"></div><div style="font-size:.74rem;color:var(--muted);margin-top:8px;line-height:1.5">Debe tener mínimo 12 caracteres e incluir al menos 3 tipos: mayúsculas, minúsculas, números o símbolos.</div><div class="fa"><button class="btn btn-p" onclick="changeOwnPassword(true)">Cambiar contraseña</button></div></div>`;
-    document.body.appendChild(modal);
-  }
-}
-
-const _origInitApp = initApp;
-initApp = function() {
-  ensureUpgradePages();
-  cargarCatalogos().then(() => { try { fc(); buildCatSelects(); } catch {} });
-  _origInitApp();
-  if (CU && CU.must_change_password) setTimeout(() => showPasswordModal(true), 300);
-};
-
-const _origBuildSidebar = buildSidebar;
-buildSidebar = function() {
-  _origBuildSidebar();
-  if (CU && CU.rol === 'admin' && !document.getElementById('nav-catalogos')) {
-    const side = document.getElementById('sidebar');
-    const marker = document.getElementById('nav-permisos');
-    const item = document.createElement('div');
-    item.className='ni'; item.id='nav-catalogos'; item.onclick=()=>showPage('catalogos');
-    item.innerHTML='<span class="nico">🗂</span><span>Catálogos</span>';
-    side.insertBefore(item, marker || side.lastChild);
-  }
-  if (!document.getElementById('nav-mi-cuenta')) {
-    const side = document.getElementById('sidebar');
-    const item = document.createElement('div');
-    item.className='ni'; item.id='nav-mi-cuenta'; item.onclick=()=>showPasswordModal(false);
-    item.innerHTML='<span class="nico">🔐</span><span>Mi clave</span>';
-    side.appendChild(item);
-  }
-};
-
-const _origShowPage = showPage;
-showPage = function(id) {
-  if (CU && CU.must_change_password && id !== 'seguridad') { showPasswordModal(true); return; }
-  _origShowPage(id);
-  if (id === 'catalogos') renderCatalogos();
-};
-
-function showPasswordModal(forced) {
-  ensureUpgradePages();
-  const m=document.getElementById('pwd-modal');
-  m.style.display='flex';
-  m.dataset.forced=forced?'1':'0';
-  document.getElementById('pwd-current').focus();
-}
-function hidePasswordModal() { document.getElementById('pwd-modal').style.display='none'; }
-async function changeOwnPassword(forced=false) {
-  const cur=document.getElementById('pwd-current').value;
-  const np=document.getElementById('pwd-new').value;
-  const cf=document.getElementById('pwd-confirm').value;
-  const er=document.getElementById('pwd-err'), ok=document.getElementById('pwd-ok');
-  er.style.display=ok.style.display='none';
-  if (!cur||!np||!cf) { er.textContent='Complete todos los campos.'; er.style.display='flex'; return; }
-  if (np!==cf) { er.textContent='La confirmación no coincide.'; er.style.display='flex'; return; }
-  try {
-    await API.post('/api/auth/change-password',{currentPassword:cur,newPassword:np});
-    CU.must_change_password=false;
-    ok.textContent='Contraseña actualizada correctamente.'; ok.style.display='flex';
-    setTimeout(()=>{ hidePasswordModal(); showPage('dashboard'); }, 900);
-  } catch(e) { er.textContent=e.message||'No fue posible cambiar la contraseña.'; er.style.display='flex'; }
-}
-
-function estadoBadge(e) {
-  const cls={ABIERTA:'b-critica',GESTION:'b-media',CERRADA:'b-baja'}[e]||'b-area';
-  return `<span class="badge ${cls}">${e||'ABIERTA'}</span>`;
-}
-
-async function cambiarEstadoNovedad(id, estado) {
-  const detalle = estado==='ABIERTA' ? '' : prompt(`Detalle de gestión para cambiar a ${estado}:`, '') || '';
-  try {
-    await API.patch(`/api/novedades/${id}/estado`, { estado, detalle });
-    await cargarNovedades();
-    if (document.getElementById('pg-historial')?.classList.contains('active')) renderTbl();
-    if (document.getElementById('pg-dashboard')?.classList.contains('active')) renderDash();
-  } catch(e) { alert(e.message); }
-}
-
-const _origCargarNovedades = cargarNovedades;
-cargarNovedades = async function() {
-  await _origCargarNovedades();
-  nov = nov.map(n => ({ ...n, estado: n.estado || 'ABIERTA' }));
-};
-
-const _origRenderDash = renderDash;
-renderDash = async function() {
-  await _origRenderDash();
-  const data=vis();
-  const abiertas=data.filter(n=>n.estado==='ABIERTA').length;
-  const gestion=data.filter(n=>n.estado==='GESTION').length;
-  const cerradas=data.filter(n=>n.estado==='CERRADA').length;
-  const critAbiertas=data.filter(n=>n.nivel==='CRITICA'&&n.estado!=='CERRADA').length;
-  document.getElementById('s0').textContent=data.length;
-  document.getElementById('s1').textContent=critAbiertas;
-  document.getElementById('s2').textContent=gestion;
-  document.getElementById('s3').textContent=cerradas;
-  const labels=document.querySelectorAll('#pg-dashboard .sc .sl');
-  if(labels[1]) labels[1].textContent='Críticas abiertas';
-  if(labels[2]) labels[2].textContent='En gestión';
-  if(labels[3]) labels[3].textContent='Cerradas';
-  let panel=document.getElementById('dash-estado-extra');
-  if(!panel){panel=document.createElement('div');panel.id='dash-estado-extra';panel.className='card';document.querySelector('#pg-dashboard .sg').after(panel);}
-  panel.innerHTML=`<div class="ch"><div class="ct2">🚦 Control por estado de novedad</div><div class="tdm">ABIERTA → GESTIÓN → CERRADA</div></div>
-  <div class="g3"><div><div class="sl">Abiertas</div><div class="sv vr">${abiertas}</div></div><div><div class="sl">En gestión</div><div class="sv vg2">${gestion}</div></div><div><div class="sl">Cerradas</div><div class="sv vgr">${cerradas}</div></div></div>`;
-};
-
-renderTbl = function() {
-  let data=vis();
-  if (fBq) { const q=fBq.toLowerCase(); data=data.filter(n=>JSON.stringify(n).toLowerCase().includes(q)); }
-  if (fAr) data=data.filter(n=>n.area===fAr);
-  if (fNv) data=data.filter(n=>n.nivel===fNv);
-  document.getElementById('tcount').textContent=`Mostrando ${data.length} novedad(es)`;
-  const tb=document.getElementById('tbody');
-  if (!data.length) { tb.innerHTML=`<tr><td colspan="10">${empty('📋','No hay registros que coincidan.')}</td></tr>`; return; }
-  tb.innerHTML=data.map(n=>`<tr>
-    <td style="font-weight:700;color:var(--muted)">#${n.id}</td>
-    <td class="tdm" style="white-space:nowrap;font-size:.72rem">${n.fecha}</td>
-    <td><span class="badge b-${n.zona?.toLowerCase()==='norte'?'norte':'sur'}">${n.zona}</span></td>
-    <td style="font-size:.8rem">${n.concesion}</td>
-    <td style="font-size:.8rem">${n.puesto}</td>
-    <td><span class="badge b-area">${n.area}</span></td>
-    <td class="tdm">${n.tipo}</td>
-    <td><span class="badge b-${n.nivel.toLowerCase()}">${n.nivel}</span><br>${estadoBadge(n.estado)}</td>
-    <td class="tdm">${n.name}</td>
-    <td><select class="si" style="font-size:.72rem;padding:5px" onchange="cambiarEstadoNovedad(${n.id},this.value)"><option value="">Cambiar...</option><option value="ABIERTA">Abierta</option><option value="GESTION">Gestión</option><option value="CERRADA">Cerrada</option></select></td>
-  </tr>`).join('');
-};
-
-const _origExportCSV = exportCSV;
-exportCSV = function() {
-  const data=vis();
-  if (!data.length) { alert('Sin datos para exportar.'); return; }
-  const h=['ID','Fecha','Zona','Concesion','Puesto','Movil','Area','Tipo','Nivel','Estado','Descripcion','Usuario','Nombre'];
-  const rows=data.map(n=>[n.id,n.fecha,n.zona,n.concesion,n.puesto,n.movil||'—',n.area,n.tipo,n.nivel,n.estado||'ABIERTA',`"${(n.descripcion||'').replace(/"/g,'""')}"`,n.user,n.name].join(','));
-  const csv=[h.join(','),...rows].join('\n');
-  const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
-  a.download='novedades_sismedica_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
-};
-
-const _origRenderRep = renderRep;
-renderRep = async function() {
-  await _origRenderRep();
-  try {
-    const data = await API.get('/api/reportes/resumen');
-    let card=document.getElementById('r-estado-card');
-    if(!card){card=document.createElement('div');card.id='r-estado-card';card.className='card';card.innerHTML='<div class="ct2" style="margin-bottom:14px">🚦 Por Estado</div><div id="r-estado"></div>';document.querySelector('#pg-reportes .g2')?.appendChild(card);}
-    const rows=data.porEstado||[];
-    if(!rows.length) document.getElementById('r-estado').innerHTML=empty('📊','Sin datos.');
-    else {
-      const total=rows.reduce((a,r)=>a+parseInt(r.total),0)||1;
-      document.getElementById('r-estado').innerHTML=rows.map(r=>`<div class="br"><div class="bl">${r.estado}</div><div class="bt"><div class="bf" style="width:${(parseInt(r.total)/total*100).toFixed(0)}%;background:${r.estado==='CERRADA'?'#1a7a3c':r.estado==='GESTION'?'#f0a832':'#e42421'}"></div></div><div class="bc">${r.total}</div></div>`).join('');
-    }
-  } catch(e){}
-};
-
-function buildCatSelects() {
-  const fill=(selId,zonaId)=>{const sel=document.getElementById(selId), z=document.getElementById(zonaId)?.value||'NORTE'; if(!sel)return; const old=sel.value; sel.innerHTML='<option value="">— Seleccione —</option>'; Object.keys(CAT[z]||{}).sort().forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;sel.appendChild(o);}); sel.value=old;};
-  fill('cat-con-p','cat-zona-p'); fill('cat-con-m','cat-zona-m');
-  const z=document.getElementById('cat-zona-m')?.value||'NORTE', c=document.getElementById('cat-con-m')?.value, ps=document.getElementById('cat-puesto-m');
-  if(ps){ps.innerHTML='<option value="">— Seleccione —</option>'; (CAT[z]?.[c]||[]).sort().forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;ps.appendChild(o);});}
-}
-async function renderCatalogos() {
-  await cargarCatalogos(); buildCatSelects();
-  const el=document.getElementById('catalog-list'); if(!el)return;
-  el.innerHTML=Object.entries(CAT).map(([zona,cons])=>`<div class="card" style="padding:14px"><div class="ct2">${zona}</div>${Object.entries(cons).sort().map(([c,puestos])=>`<div style="border-top:1px solid var(--border);padding:10px 0"><div style="display:flex;justify-content:space-between;gap:8px"><b>${c}</b><button class="btn btn-s btn-sm" onclick="delCatalogCon('${zona}','${encodeURIComponent(c)}')">Eliminar concesión</button></div><div style="margin-top:6px">${(puestos||[]).map(p=>`<div style="font-size:.78rem;color:var(--muted);padding:3px 0">• ${p} <button class="btn btn-s btn-sm" onclick="delCatalogPuesto('${zona}','${encodeURIComponent(c)}','${encodeURIComponent(p)}')">Eliminar puesto</button> <span style="color:#294996">${(MOV[c+'|'+p]||[]).join(' · ')}</span></div>`).join('')||'<span class="tdm">Sin puestos</span>'}</div></div>`).join('')}</div>`).join('');
-}
-async function addCatalogCon(){try{await API.post('/api/catalogos/concesiones',{zona:document.getElementById('cat-zona').value,concesion:document.getElementById('cat-con').value});document.getElementById('cat-con').value='';renderCatalogos();}catch(e){alert(e.message);}}
-async function addCatalogPuesto(){try{await API.post('/api/catalogos/puestos',{zona:document.getElementById('cat-zona-p').value,concesion:document.getElementById('cat-con-p').value,puesto:document.getElementById('cat-puesto').value});document.getElementById('cat-puesto').value='';renderCatalogos();}catch(e){alert(e.message);}}
-async function addCatalogPlaca(){try{await API.post('/api/catalogos/placas',{zona:document.getElementById('cat-zona-m').value,concesion:document.getElementById('cat-con-m').value,puesto:document.getElementById('cat-puesto-m').value,placa:document.getElementById('cat-placa').value});document.getElementById('cat-placa').value='';renderCatalogos();}catch(e){alert(e.message);}}
-async function delCatalogCon(z,c){if(!confirm('¿Eliminar concesión del catálogo?'))return;try{await API.delete(`/api/catalogos/concesiones/${z}/${c}`);renderCatalogos();}catch(e){alert(e.message);}}
-async function delCatalogPuesto(z,c,p){if(!confirm('¿Eliminar puesto del catálogo?'))return;try{await API.delete(`/api/catalogos/puestos/${z}/${c}/${p}`);renderCatalogos();}catch(e){alert(e.message);}}
-
-// ============================================================
-// V2.1 — Histórico de placas, KPIs Power BI y criticidades dashboard
-// ============================================================
-async function getPlacasHistorico() {
-  try {
-    if (!CU || !['admin','gerente'].includes(CU.rol)) return [];
-    const data = await API.get('/api/catalogos/placas/historial');
-    return data.placas || [];
-  } catch(e) { return []; }
-}
-
-// Reemplaza renderCatalogos para mostrar placa activa + histórico conservado.
-renderCatalogos = async function() {
-  await cargarCatalogos(); buildCatSelects();
-  const el=document.getElementById('catalog-list'); if(!el)return;
-  const hist = await getPlacasHistorico();
-  const histMap = {};
-  hist.forEach(x => {
-    const key = `${x.concesion}|${x.puesto}`;
-    histMap[key] = histMap[key] || [];
-    histMap[key].push(x);
-  });
-  el.innerHTML=Object.entries(CAT).map(([zona,cons])=>`<div class="card" style="padding:14px"><div class="ct2">${zona}</div>${Object.entries(cons).sort().map(([c,puestos])=>`<div style="border-top:1px solid var(--border);padding:10px 0"><div style="display:flex;justify-content:space-between;gap:8px"><b>${c}</b><button class="btn btn-s btn-sm" onclick="delCatalogCon('${zona}','${encodeURIComponent(c)}')">Eliminar concesión</button></div><div style="margin-top:6px">${(puestos||[]).map(p=>{const key=c+'|'+p; const active=(MOV[key]||[]); const old=(histMap[key]||[]).filter(x=>!x.activo); return `<div style="font-size:.78rem;color:var(--muted);padding:7px 0;border-top:1px dashed var(--border)">• <b>${p}</b> <button class="btn btn-s btn-sm" onclick="delCatalogPuesto('${zona}','${encodeURIComponent(c)}','${encodeURIComponent(p)}')">Eliminar puesto</button><br><span style="color:#1a7a3c;font-weight:700">Activa: ${active.length?active.join(' · '):'Sin placa activa'}</span>${old.length?`<details style="margin-top:5px"><summary style="cursor:pointer;color:#294996">Histórico de placas (${old.length})</summary><div style="margin-top:5px">${old.map(h=>`<span class="badge" style="background:#f3f4f6;color:#444;margin:2px">${h.placa} · inactiva · ${h.desactivado_en_formato||h.creado_en_formato||''}</span>`).join('')}</div></details>`:''}</div>`}).join('')||'<span class="tdm">Sin puestos</span>'}</div></div>`).join('')}</div>`).join('');
-};
-
-function renderCriticidadResumen(rows) {
-  if (!rows || !rows.length) return empty('🎯','Sin criticidades registradas.');
-  const top = rows.slice(0, 12);
-  return `<div style="display:grid;gap:8px">${top.map(r => {
-    const nivel = r.nivel || '—';
-    const cls = nivel === 'CRITICA' ? 'b-critica' : nivel === 'MEDIA' ? 'b-media' : 'b-baja';
-    return `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:1px solid var(--border);padding:7px 0">
-      <div style="min-width:0"><span class="badge ${cls}">${nivel}</span> <b>${r.area || '—'}</b><br><span class="tdm">${r.tipo_novedad || '—'} · Estado: ${r.estado || '—'}</span></div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.35rem;color:var(--accent2)">${r.total}</div>
-    </div>`;
-  }).join('')}</div>`;
-}
-
-const _dashV21 = renderDash;
-renderDash = async function() {
-  await _dashV21();
-  try {
-    const data = await API.get('/api/reportes/resumen');
-    let panel=document.getElementById('dash-criticidad-extra');
-    const anchor=document.getElementById('dash-estado-extra') || document.querySelector('#pg-dashboard .g2');
-    if(!panel){panel=document.createElement('div');panel.id='dash-criticidad-extra';panel.className='card';anchor.after(panel);}
-    const t=data.tiemposCierre || {};
-    panel.innerHTML=`<div class="ch"><div class="ct2">🎯 Resumen de criticidades y oportunidad de cierre</div><div class="tdm">KPI gerencial</div></div>
-      <div class="g3" style="margin-bottom:14px">
-        <div><div class="sl">Cerradas</div><div class="sv vgr">${t.cerradas || 0}</div></div>
-        <div><div class="sl">Horas prom. cierre</div><div class="sv vb">${t.horas_promedio_cierre || '—'}</div></div>
-        <div><div class="sl">Horas prom. abiertas</div><div class="sv vr">${t.horas_promedio_abiertas || '—'}</div></div>
-      </div>
-      ${renderCriticidadResumen(data.porCriticidadDetalle || [])}`;
-  } catch(e) { console.warn('Resumen criticidades no disponible:', e.message); }
-};
-
-const _repV21 = renderRep;
-renderRep = async function() {
-  await _repV21();
-  try {
-    const data = await API.get('/api/reportes/resumen');
-    let crit=document.getElementById('r-criticidad-card');
-    if(!crit){crit=document.createElement('div');crit.id='r-criticidad-card';crit.className='card';crit.innerHTML='<div class="ct2" style="margin-bottom:14px">🎯 Criticidades por área, tipo y estado</div><div id="r-criticidad"></div>';document.querySelector('#pg-reportes')?.appendChild(crit);}
-    document.getElementById('r-criticidad').innerHTML=renderCriticidadResumen(data.porCriticidadDetalle || []);
-    let bi=document.getElementById('r-bi-card');
-    if(!bi && ['admin','gerente'].includes(CU.rol)){
-      bi=document.createElement('div');bi.id='r-bi-card';bi.className='card';document.querySelector('#pg-reportes')?.appendChild(bi);
-    }
-    if(bi){bi.innerHTML=`<div class="ct2" style="margin-bottom:10px">📊 Integración Power BI Gerencial</div>
-      <div class="pgs">Endpoint seguro para conectar Power BI Web/API. Use header <b>x-bi-token</b> con la variable <b>BI_API_TOKEN</b> configurada en Render.</div>
-      <code style="display:block;background:var(--surface2);padding:10px;border-radius:8px;margin-top:8px;font-size:.75rem;white-space:pre-wrap">${location.origin}/api/bi/kpis</code>
-      <div style="margin-top:8px;font-size:.76rem;color:var(--muted)">Incluye novedades, criticidades, responsables, concesiones y tiempos promedio de cierre.</div>`;}
-  } catch(e) { console.warn('Reportes v2.1 no disponibles:', e.message); }
-};
