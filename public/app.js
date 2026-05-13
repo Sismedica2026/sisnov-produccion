@@ -2078,3 +2078,303 @@ renderRep = async function() {
     if (typeof cambiarEstadoNovedad === 'function') cambiarEstadoNovedad(sel.dataset.id, sel.value);
   });
 })();
+
+// ============================================================
+// SISNOV — SUPERFIX FINAL FILTROS HISTORIAL
+// Objetivo: corregir filtros que no aplican/restauran datos.
+// Alcance: solo frontend Historial. No toca usuarios, contraseñas,
+// base de datos, Power BI ni endpoints.
+// ============================================================
+(function sisnovHistorialFiltrosSuperFix(){
+  if (window.__sisnovHistorialFiltrosSuperFixLoaded) return;
+  window.__sisnovHistorialFiltrosSuperFixLoaded = true;
+
+  const state = { q:'', area:'', criticidad:'', estado:'' };
+
+  function esc(v){
+    return String(v ?? '')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+
+  function norm(v){
+    return String(v ?? '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .trim().toUpperCase();
+  }
+
+  function compact(v){ return String(v ?? '').replace(/\s+/g,' ').trim(); }
+
+  function getBaseRows(){
+    try {
+      const rows = (typeof vis === 'function') ? vis() : (Array.isArray(window.nov) ? window.nov : []);
+      return Array.isArray(rows) ? rows.slice() : [];
+    } catch(e) { return []; }
+  }
+
+  function getPage(){ return document.getElementById('pg-historial'); }
+  function getToolbar(){ const p=getPage(); return p ? p.querySelector('.tc') : null; }
+
+  function uniqueOptions(rows, key, extra=[]){
+    const vals = [];
+    extra.forEach(v => vals.push(v));
+    rows.forEach(r => { if (r && r[key] != null && compact(r[key])) vals.push(compact(r[key])); });
+    const seen = new Set();
+    return vals.filter(v => {
+      const k = norm(v);
+      if (!k || seen.has(k)) return false;
+      seen.add(k); return true;
+    }).sort((a,b)=>String(a).localeCompare(String(b),'es'));
+  }
+
+  function optionHtml(values, selected, label){
+    const selectedNorm = norm(selected);
+    return [`<option value="">${esc(label)}</option>`].concat(values.map(v =>
+      `<option value="${esc(v)}" ${norm(v)===selectedNorm?'selected':''}>${esc(v)}</option>`
+    )).join('');
+  }
+
+  function ensureControls(){
+    const toolbar = getToolbar();
+    if (!toolbar) return;
+
+    let input = document.getElementById('hist-filter-search') || toolbar.querySelector('input');
+    const selectList = Array.from(toolbar.querySelectorAll('select'));
+    let area = document.getElementById('hist-filter-area') || selectList[0];
+    let crit = document.getElementById('hist-filter-criticidad') || selectList[1];
+    let estado = document.getElementById('hist-filter-estado') || selectList[2];
+
+    // Si los controles venían con onchange inline, se reemplazan una sola vez por clones limpios.
+    function cleanControl(el, id, type){
+      if (!el) return el;
+      if (el.dataset.superfixCleaned !== '1') {
+        const clone = el.cloneNode(false);
+        clone.innerHTML = el.innerHTML;
+        clone.value = el.value || '';
+        clone.className = el.className || (type==='select' ? 'si' : '');
+        clone.placeholder = el.placeholder || '';
+        clone.style.cssText = el.style.cssText || '';
+        el.parentNode.replaceChild(clone, el);
+        el = clone;
+      }
+      el.id = id;
+      el.dataset.superfixCleaned = '1';
+      el.dataset.histFilter = id.replace('hist-filter-','');
+      el.removeAttribute('onchange');
+      el.removeAttribute('oninput');
+      el.removeAttribute('onclick');
+      return el;
+    }
+
+    input = cleanControl(input, 'hist-filter-search', 'input');
+    area = cleanControl(area, 'hist-filter-area', 'select');
+    crit = cleanControl(crit, 'hist-filter-criticidad', 'select');
+
+    if (!estado) {
+      estado = document.createElement('select');
+      estado.className = 'si';
+      estado.style.width = '150px';
+      if (crit && crit.parentNode) crit.after(estado); else toolbar.appendChild(estado);
+    }
+    estado = cleanControl(estado, 'hist-filter-estado', 'select');
+
+    if (input && !input.placeholder) input.placeholder = '🔍 Buscar...';
+
+    const rows = getBaseRows();
+    if (area) area.innerHTML = optionHtml(uniqueOptions(rows,'area'), state.area || area.value, 'Todas las áreas');
+    if (crit) crit.innerHTML = optionHtml(uniqueOptions(rows,'nivel',['CRITICA','MEDIA','BAJA']), state.criticidad || crit.value, 'Todas las criticidades');
+    if (estado) estado.innerHTML = optionHtml(uniqueOptions(rows,'estado',['ABIERTA','GESTION','CERRADA']), state.estado || estado.value, 'Todos los estados');
+
+    if (!document.getElementById('hist-filter-clear')) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-s btn-sm';
+      btn.id = 'hist-filter-clear';
+      btn.textContent = 'Limpiar filtros';
+      const csv = Array.from(toolbar.querySelectorAll('button')).find(b => /csv/i.test(b.textContent || ''));
+      if (csv) csv.before(btn); else toolbar.appendChild(btn);
+    }
+  }
+
+  function readFilters(){
+    const q = document.getElementById('hist-filter-search');
+    const a = document.getElementById('hist-filter-area');
+    const c = document.getElementById('hist-filter-criticidad');
+    const e = document.getElementById('hist-filter-estado');
+    state.q = q ? q.value || '' : state.q;
+    state.area = a ? a.value || '' : state.area;
+    state.criticidad = c ? c.value || '' : state.criticidad;
+    state.estado = e ? e.value || '' : state.estado;
+  }
+
+  function matchField(value, filter){
+    const v = norm(value), f = norm(filter);
+    if (!f) return true;
+    if (!v) return false;
+    return v === f || v.includes(f) || f.includes(v);
+  }
+
+  function filteredRows(){
+    readFilters();
+    let rows = getBaseRows();
+    const q = compact(state.q).toLowerCase();
+    if (q) {
+      rows = rows.filter(n => [
+        n.id, n.fecha, n.fecha_iso, n.zona, n.concesion, n.puesto, n.movil, n.placa,
+        n.area, n.tipo, n.nivel, n.estado, n.descripcion, n.hallazgo_descripcion,
+        n.descripcion_hallazgo, n.user, n.name, n.nombre_supervisor
+      ].join(' ').toLowerCase().includes(q));
+    }
+    if (state.area) rows = rows.filter(n => matchField(n.area, state.area));
+    if (state.criticidad) rows = rows.filter(n => matchField(n.nivel, state.criticidad));
+    if (state.estado) rows = rows.filter(n => matchField(n.estado || 'ABIERTA', state.estado));
+    return rows;
+  }
+
+  function parseDate(v){
+    if (!v) return null;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function diasGestion(n){
+    const start = parseDate(n.creado_en) || parseDate(n.fecha_iso) || parseDate(n.fecha) || (n.ts ? new Date(n.ts) : null);
+    if (!start || isNaN(start.getTime())) return {dias:'—', texto:'Sin fecha'};
+    const cerrada = norm(n.estado || 'ABIERTA') === 'CERRADA';
+    const end = cerrada ? (parseDate(n.cerrado_en) || parseDate(n.fecha_cierre) || new Date()) : new Date();
+    const dias = Math.max(0, Math.ceil((end.getTime() - start.getTime()) / 86400000));
+    return { dias, texto: cerrada ? `${dias} día(s) al cierre` : `${dias} día(s) abierta` };
+  }
+
+  function ensureHeader(){
+    const p = getPage();
+    const tr = p && p.querySelector('table thead tr');
+    if (!tr) return;
+    tr.innerHTML = `<th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th><th>Área</th><th>Tipo</th><th>Criticidad</th><th>Estado</th><th>Días abierta / cierre</th><th>Descripción del Hallazgo</th><th>Supervisor</th><th>Gestión</th>`;
+  }
+
+  function estadoBadgeLocal(e){
+    if (typeof estadoBadge === 'function') return estadoBadge(e || 'ABIERTA');
+    const val = e || 'ABIERTA';
+    const cls = norm(val)==='CERRADA'?'b-baja':norm(val)==='GESTION'?'b-media':'b-critica';
+    return `<span class="badge ${cls}">${esc(val)}</span>`;
+  }
+
+  function renderDona(){
+    const p = getPage(); if (!p) return;
+    let card = document.getElementById('hist-dona-supervisores');
+    if (!card) {
+      card = document.createElement('div');
+      card.id = 'hist-dona-supervisores';
+      card.className = 'card';
+      card.style.marginBottom = '14px';
+      card.innerHTML = `<div class="ch"><div class="ct2">🍩 Participación diaria por supervisor</div><div class="tdm">Novedades de hoy según filtros aplicados</div></div><div id="hist-dona-body"></div>`;
+      const toolbar = getToolbar();
+      if (toolbar && toolbar.parentNode) toolbar.parentNode.insertBefore(card, toolbar); else p.prepend(card);
+    }
+    const el = document.getElementById('hist-dona-body'); if (!el) return;
+    const now = new Date();
+    const todayRows = filteredRows().filter(n => {
+      const d = parseDate(n.creado_en) || parseDate(n.fecha_iso) || parseDate(n.fecha) || (n.ts ? new Date(n.ts) : null);
+      return d && d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth() && d.getDate()===now.getDate();
+    });
+    if (!todayRows.length) { el.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:.82rem">Sin novedades de hoy para graficar con los filtros actuales.</div>`; return; }
+    const counts = {};
+    todayRows.forEach(n => { const k = n.name || n.nombre_supervisor || n.user || 'Sin supervisor'; counts[k]=(counts[k]||0)+1; });
+    const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+    const total = entries.reduce((s,x)=>s+x[1],0) || 1;
+    const colors = ['#294996','#e42421','#1a7a3c','#f0a832','#8b5cf6','#1abc9c','#e67e22','#5a6e9a','#0f766e','#be185d'];
+    let acc=0;
+    const gradient = entries.map(([_,v],i)=>{ const pct=v/total*100; const s=acc; acc+=pct; return `${colors[i%colors.length]} ${s.toFixed(2)}% ${acc.toFixed(2)}%`; }).join(', ');
+    el.innerHTML = `<div style="display:grid;grid-template-columns:160px 1fr;gap:18px;align-items:center"><div style="width:148px;height:148px;border-radius:50%;background:conic-gradient(${gradient});position:relative;margin:auto;box-shadow:0 8px 22px rgba(0,0,0,.08)"><div style="position:absolute;inset:34px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;text-align:center;font-weight:800;color:var(--text)">${total}<br><span style="font-size:.65rem;color:var(--muted);font-weight:600">hoy</span></div></div><div>${entries.map(([name,count],i)=>`<div style="display:grid;grid-template-columns:14px 1fr auto auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)"><span style="width:10px;height:10px;border-radius:50%;background:${colors[i%colors.length]};display:inline-block"></span><span style="font-size:.78rem;font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name)}</span><span class="tdm">${count}</span><span class="badge b-area">${(count/total*100).toFixed(1)}%</span></div>`).join('')}</div></div>`;
+  }
+
+  function renderTable(){
+    ensureControls();
+    ensureHeader();
+    const rows = filteredRows();
+    const tcount = document.getElementById('tcount');
+    if (tcount) {
+      const tags=[];
+      if (state.q) tags.push(`búsqueda: "${state.q}"`);
+      if (state.area) tags.push(`área: ${state.area}`);
+      if (state.criticidad) tags.push(`criticidad: ${state.criticidad}`);
+      if (state.estado) tags.push(`estado: ${state.estado}`);
+      tcount.textContent = `Mostrando ${rows.length} novedad(es)` + (tags.length ? ` · Filtros: ${tags.join(' · ')}` : '');
+    }
+    const tb = document.getElementById('tbody'); if (!tb) return;
+    if (!rows.length) {
+      tb.innerHTML = `<tr><td colspan="13">${typeof empty==='function'?empty('📋','No hay registros que coincidan. Use Limpiar filtros para restaurar la vista.'):'No hay registros que coincidan.'}</td></tr>`;
+      renderDona(); return;
+    }
+    tb.innerHTML = rows.map(n => {
+      const dias = diasGestion(n);
+      const hallazgo = n.hallazgo_descripcion || n.descripcion_hallazgo || n.descripcion || '';
+      return `<tr>
+        <td style="font-weight:700;color:var(--muted)">#${esc(n.id)}</td>
+        <td class="tdm" style="white-space:nowrap;font-size:.72rem">${esc(n.fecha || '')}</td>
+        <td><span class="badge b-${norm(n.zona)==='NORTE'?'norte':'sur'}">${esc(n.zona || '')}</span></td>
+        <td style="font-size:.8rem">${esc(n.concesion || '')}</td>
+        <td style="font-size:.8rem">${esc(n.puesto || '')}</td>
+        <td><span class="badge b-area">${esc(n.area || '')}</span></td>
+        <td class="tdm">${esc(n.tipo || '')}</td>
+        <td><span class="badge b-${String(n.nivel||'').toLowerCase()}">${esc(n.nivel || '')}</span></td>
+        <td>${estadoBadgeLocal(n.estado || 'ABIERTA')}</td>
+        <td class="tdm"><b>${esc(dias.dias)}</b><br><span style="font-size:.65rem;color:var(--muted)">${esc(dias.texto)}</span></td>
+        <td style="font-size:.74rem;max-width:260px;white-space:normal;line-height:1.35" title="${esc(hallazgo)}">${esc(compact(hallazgo).slice(0,120) || '—')}${compact(hallazgo).length>120?'…':''}</td>
+        <td class="tdm">${esc(n.name || n.nombre_supervisor || n.user || '')}</td>
+        <td><select class="si hist-status-change" data-id="${esc(n.id)}" style="font-size:.72rem;padding:5px"><option value="">Cambiar...</option><option value="ABIERTA">Abierta</option><option value="GESTION">Gestión</option><option value="CERRADA">Cerrada</option></select></td>
+      </tr>`;
+    }).join('');
+    renderDona();
+  }
+
+  // Reemplazo global definitivo de renderTbl.
+  try { window.renderTbl = renderTbl = renderTable; } catch(e) { window.renderTbl = renderTable; }
+
+  const prevRenderHist = window.renderHist || (typeof renderHist === 'function' ? renderHist : null);
+  if (typeof prevRenderHist === 'function') {
+    try {
+      window.renderHist = renderHist = async function(){
+        await prevRenderHist.apply(this, arguments);
+        renderTable();
+      };
+    } catch(e) { window.renderHist = async function(){ await prevRenderHist.apply(this, arguments); renderTable(); }; }
+  }
+
+  document.addEventListener('input', function(e){
+    const p = getPage();
+    if (!p || !p.contains(e.target)) return;
+    if (e.target && e.target.matches('#hist-filter-search')) { state.q = e.target.value || ''; renderTable(); }
+  }, true);
+
+  document.addEventListener('change', function(e){
+    const p = getPage();
+    if (!p || !p.contains(e.target)) return;
+    const t = e.target;
+    if (t.matches('#hist-filter-area')) { state.area = t.value || ''; renderTable(); return; }
+    if (t.matches('#hist-filter-criticidad')) { state.criticidad = t.value || ''; renderTable(); return; }
+    if (t.matches('#hist-filter-estado')) { state.estado = t.value || ''; renderTable(); return; }
+    if (t.matches('.hist-status-change')) {
+      const id = t.dataset.id;
+      const val = t.value;
+      if (id && val && typeof cambiarEstadoNovedad === 'function') cambiarEstadoNovedad(id, val);
+    }
+  }, true);
+
+  document.addEventListener('click', function(e){
+    const p = getPage();
+    if (!p || !p.contains(e.target)) return;
+    const btn = e.target.closest && e.target.closest('#hist-filter-clear');
+    if (!btn) return;
+    e.preventDefault();
+    state.q = state.area = state.criticidad = state.estado = '';
+    ['hist-filter-search','hist-filter-area','hist-filter-criticidad','hist-filter-estado'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+    renderTable();
+  }, true);
+
+  setTimeout(() => { if (getPage() && getPage().classList.contains('active')) renderTable(); }, 300);
+})();
