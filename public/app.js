@@ -1138,3 +1138,186 @@ renderRep = async function() {
     if (pwd && pwd.style.display === 'flex') pwd.style.pointerEvents = 'auto';
   }, 750);
 })();
+
+// ============================================================
+// SISNOV — Ajuste puntual Historial: días abiertos, hallazgo y dona diaria
+// Cambios solo frontend. No toca usuarios, contraseñas, BD ni Power BI.
+// ============================================================
+(function sisnovHistorialSlaHallazgoDona(){
+  if (window.__sisnovHistorialSlaHallazgoDonaLoaded) return;
+  window.__sisnovHistorialSlaHallazgoDonaLoaded = true;
+
+  function esc(v){
+    return String(v ?? '')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+
+  function shortText(v, max=62){
+    const s = String(v || '').replace(/\s+/g,' ').trim();
+    if (!s) return '—';
+    return s.length > max ? s.slice(0, max - 1) + '…' : s;
+  }
+
+  function parseDateSafe(v){
+    if (!v) return null;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function diasGestion(n){
+    const inicio = parseDateSafe(n.creado_en) || (n.ts ? new Date(n.ts) : null);
+    if (!inicio) return {dias:'—', texto:'Sin fecha'};
+    const cerrado = String(n.estado || '').toUpperCase() === 'CERRADA';
+    const fin = cerrado && n.cerrado_en ? (parseDateSafe(n.cerrado_en) || new Date()) : new Date();
+    const ms = Math.max(0, fin.getTime() - inicio.getTime());
+    const dias = Math.max(0, Math.ceil(ms / 86400000));
+    return {
+      dias,
+      texto: cerrado ? `${dias} día(s) al cierre` : `${dias} día(s) abierta`
+    };
+  }
+
+  function isTodayRecord(n){
+    const d = parseDateSafe(n.creado_en) || (n.ts ? new Date(n.ts) : null);
+    if (!d) return false;
+    const now = new Date();
+    return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth() && d.getDate()===now.getDate();
+  }
+
+  function datosHistorialFiltrados(){
+    let data = typeof vis === 'function' ? vis() : (window.nov || []);
+    try {
+      if (typeof fBq !== 'undefined' && fBq) {
+        const q=String(fBq).toLowerCase();
+        data=data.filter(n=>JSON.stringify(n).toLowerCase().includes(q));
+      }
+      if (typeof fAr !== 'undefined' && fAr) data=data.filter(n=>n.area===fAr);
+      if (typeof fNv !== 'undefined' && fNv) data=data.filter(n=>n.nivel===fNv);
+    } catch(e) {}
+    return data;
+  }
+
+  function ensureHistorialUi(){
+    const page = document.getElementById('pg-historial');
+    if (!page) return;
+    const tr = page.querySelector('table thead tr');
+    if (tr && !tr.dataset.historialEnhanced) {
+      tr.dataset.historialEnhanced = '1';
+      tr.innerHTML = `
+        <th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th>
+        <th>Área</th><th>Tipo</th><th>Nivel</th><th>Estado</th><th>Días abierta / cierre</th>
+        <th>Descripción del Hallazgo</th><th>Supervisor</th><th>Gestión</th>`;
+    }
+    if (!document.getElementById('hist-dona-supervisores')) {
+      const card = document.createElement('div');
+      card.id = 'hist-dona-supervisores';
+      card.className = 'card';
+      card.style.marginBottom = '14px';
+      card.innerHTML = `<div class="ch"><div class="ct2">🍩 Participación diaria por supervisor</div><div class="tdm">Novedades registradas hoy dentro del alcance visible</div></div><div id="hist-dona-body"></div>`;
+      const toolbar = page.querySelector('.toolbar');
+      if (toolbar) toolbar.after(card);
+      else page.prepend(card);
+    }
+  }
+
+  function renderDonaSupervisores(){
+    ensureHistorialUi();
+    const el = document.getElementById('hist-dona-body');
+    if (!el) return;
+    const data = datosHistorialFiltrados().filter(isTodayRecord);
+    if (!data.length) {
+      el.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:.82rem">Sin novedades registradas hoy para graficar.</div>`;
+      return;
+    }
+    const counts = {};
+    data.forEach(n=>{
+      const key = n.name || n.nombre_supervisor || n.user || n.registrado_por || 'Sin supervisor';
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    const rows = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+    const total = rows.reduce((a,r)=>a+r[1],0) || 1;
+    const palette = ['#294996','#e42421','#1a7a3c','#f0a832','#8b5cf6','#1abc9c','#e67e22','#5a6e9a','#0f766e','#be185d'];
+    let acc = 0;
+    const parts = rows.map(([name,count],i)=>{
+      const pct = count/total*100;
+      const start = acc;
+      acc += pct;
+      return `${palette[i % palette.length]} ${start.toFixed(2)}% ${acc.toFixed(2)}%`;
+    }).join(', ');
+    el.innerHTML = `<div style="display:grid;grid-template-columns:160px 1fr;gap:18px;align-items:center">
+      <div style="width:148px;height:148px;border-radius:50%;background:conic-gradient(${parts});position:relative;margin:auto;box-shadow:0 8px 22px rgba(0,0,0,.08)">
+        <div style="position:absolute;inset:34px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;text-align:center;font-weight:800;color:var(--text)">${total}<br><span style="font-size:.65rem;color:var(--muted);font-weight:600">hoy</span></div>
+      </div>
+      <div>${rows.map(([name,count],i)=>{
+        const pct = (count/total*100).toFixed(1);
+        return `<div style="display:grid;grid-template-columns:14px 1fr auto auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
+          <span style="width:10px;height:10px;border-radius:50%;background:${palette[i % palette.length]};display:inline-block"></span>
+          <span style="font-size:.78rem;font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name)}</span>
+          <span class="tdm">${count}</span>
+          <span class="badge b-area">${pct}%</span>
+        </div>`;
+      }).join('')}</div>
+    </div>`;
+  }
+
+  const prevRenderHist = window.renderHist;
+  if (typeof prevRenderHist === 'function') {
+    window.renderHist = async function(){
+      await prevRenderHist.apply(this, arguments);
+      ensureHistorialUi();
+      renderDonaSupervisores();
+    };
+  }
+
+  window.renderTbl = function(){
+    ensureHistorialUi();
+    let data = datosHistorialFiltrados();
+    const tcount = document.getElementById('tcount');
+    if (tcount) tcount.textContent = `Mostrando ${data.length} novedad(es)`;
+    const tb = document.getElementById('tbody');
+    if (!tb) return;
+    if (!data.length) {
+      tb.innerHTML = `<tr><td colspan="13">${typeof empty==='function'?empty('📋','No hay registros que coincidan.'):'No hay registros que coincidan.'}</td></tr>`;
+      renderDonaSupervisores();
+      return;
+    }
+    tb.innerHTML = data.map(n=>{
+      const d = diasGestion(n);
+      const desc = n.descripcion || n.hallazgo_descripcion || n.descripcion_hallazgo || '';
+      const estado = n.estado || 'ABIERTA';
+      const nivel = n.nivel || 'BAJA';
+      const zona = n.zona || '—';
+      return `<tr>
+        <td style="font-weight:700;color:var(--muted)">#${esc(n.id)}</td>
+        <td class="tdm" style="white-space:nowrap;font-size:.72rem">${esc(n.fecha || '')}</td>
+        <td><span class="badge b-${String(zona).toLowerCase()==='norte'?'norte':'sur'}">${esc(zona)}</span></td>
+        <td style="font-size:.8rem">${esc(n.concesion)}</td>
+        <td style="font-size:.8rem">${esc(n.puesto)}</td>
+        <td><span class="badge b-area">${esc(n.area)}</span></td>
+        <td class="tdm">${esc(n.tipo)}</td>
+        <td><span class="badge b-${String(nivel).toLowerCase()}">${esc(nivel)}</span></td>
+        <td>${typeof estadoBadge==='function'?estadoBadge(estado):`<span class="badge b-area">${esc(estado)}</span>`}</td>
+        <td class="tdm" title="${esc(d.texto)}"><b>${esc(d.dias)}</b><br><span style="font-size:.65rem">${String(estado).toUpperCase()==='CERRADA'?'al cierre':'abierta'}</span></td>
+        <td style="max-width:260px;font-size:.76rem;line-height:1.35" title="${esc(desc)}">${esc(shortText(desc, 90))}</td>
+        <td class="tdm">${esc(n.name)}</td>
+        <td><select class="si" data-hist-estado="1" data-id="${esc(n.id)}" style="font-size:.72rem;padding:5px"><option value="">Cambiar...</option><option value="ABIERTA">Abierta</option><option value="GESTION">Gestión</option><option value="CERRADA">Cerrada</option></select></td>
+      </tr>`;
+    }).join('');
+    renderDonaSupervisores();
+  };
+
+  const oldFh = window.fh, oldFa2 = window.fa2, oldFn2 = window.fn2;
+  window.fh = function(v){ if (typeof oldFh==='function') oldFh(v); else { window.fBq=v; window.renderTbl(); } renderDonaSupervisores(); };
+  window.fa2 = function(v){ if (typeof oldFa2==='function') oldFa2(v); else { window.fAr=v; window.renderTbl(); } renderDonaSupervisores(); };
+  window.fn2 = function(v){ if (typeof oldFn2==='function') oldFn2(v); else { window.fNv=v; window.renderTbl(); } renderDonaSupervisores(); };
+
+  document.addEventListener('change', function(e){
+    const sel = e.target && e.target.closest && e.target.closest('select[data-hist-estado]');
+    if (!sel || !sel.value) return;
+    if (typeof cambiarEstadoNovedad === 'function') cambiarEstadoNovedad(sel.dataset.id, sel.value);
+  });
+})();
