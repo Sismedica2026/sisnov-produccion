@@ -427,45 +427,6 @@ async function renderHist() {
   renderTbl();
 }
 
-
-function escHtml(v) {
-  return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-}
-function shortText(v, max=80) {
-  const t = String(v || '').replace(/\s+/g,' ').trim();
-  if (!t) return '—';
-  return t.length > max ? t.slice(0, max - 1) + '…' : t;
-}
-function verHallazgo(id) {
-  const n = nov.find(x => Number(x.id) === Number(id));
-  if (!n) return;
-  const box = document.createElement('div');
-  box.className = 'hallazgo-modal-backdrop';
-  box.innerHTML = `
-    <div class="hallazgo-modal" role="dialog" aria-modal="true" aria-label="Detalle del hallazgo">
-      <div class="hallazgo-modal-head">
-        <div>
-          <div class="hallazgo-modal-title">Hallazgo / Descripción</div>
-          <div class="hallazgo-modal-sub">Novedad #${escHtml(n.id)} · ${escHtml(n.fecha || '')}</div>
-        </div>
-        <button class="hallazgo-close" type="button" aria-label="Cerrar">×</button>
-      </div>
-      <div class="hallazgo-meta">
-        <span>${escHtml(n.zona || '—')}</span>
-        <span>${escHtml(n.concesion || '—')}</span>
-        <span>${escHtml(n.puesto || '—')}</span>
-        <span>${escHtml(n.area || '—')}</span>
-        <span>${escHtml(n.nivel || '—')}</span>
-      </div>
-      <div class="hallazgo-text">${escHtml(n.descripcion || 'Sin descripción registrada.')}</div>
-    </div>`;
-  document.body.appendChild(box);
-  const close = () => box.remove();
-  box.querySelector('.hallazgo-close').addEventListener('click', close);
-  box.addEventListener('click', e => { if (e.target === box) close(); });
-  document.addEventListener('keydown', function onKey(e){ if(e.key==='Escape'){ close(); document.removeEventListener('keydown', onKey); } });
-}
-
 function renderTbl() {
   let data=vis();
   if (fBq) { const q=fBq.toLowerCase(); data=data.filter(n=>JSON.stringify(n).toLowerCase().includes(q)); }
@@ -473,29 +434,18 @@ function renderTbl() {
   if (fNv) data=data.filter(n=>n.nivel===fNv);
   document.getElementById('tcount').textContent=`Mostrando ${data.length} novedad(es)`;
   const tb=document.getElementById('tbody');
-  if (!data.length) { tb.innerHTML=`<tr><td colspan="10">${empty('📋','No hay registros que coincidan.')}</td></tr>`; return; }
-  tb.innerHTML=data.map(n=>{
-    const hallazgo = escHtml(shortText(n.descripcion, 72));
-    const descFull = escHtml(n.descripcion || 'Sin descripción registrada.');
-    return `<tr>
-      <td style="font-weight:700;color:var(--muted)">#${n.id}</td>
-      <td class="tdm" style="white-space:nowrap;font-size:.72rem">${escHtml(n.fecha)}</td>
-      <td><span class="badge b-${n.zona?.toLowerCase()==='norte'?'norte':'sur'}">${escHtml(n.zona)}</span></td>
-      <td style="font-size:.8rem">${escHtml(n.concesion)}</td>
-      <td style="font-size:.8rem">${escHtml(n.puesto)}</td>
-      <td><span class="badge b-area">${escHtml(n.area)}</span></td>
-      <td class="tdm">${escHtml(n.tipo)}</td>
-      <td class="tdm hallazgo-cell" title="${descFull}">
-        <span>${hallazgo}</span>
-        <button class="btn-hallazgo" type="button" data-hallazgo-id="${n.id}">Ver</button>
-      </td>
-      <td><span class="badge b-${String(n.nivel||'').toLowerCase()}">${escHtml(n.nivel)}</span></td>
-      <td class="tdm">${escHtml(n.name)}</td>
-    </tr>`;
-  }).join('');
-  tb.querySelectorAll('[data-hallazgo-id]').forEach(btn => {
-    btn.addEventListener('click', () => verHallazgo(btn.dataset.hallazgoId));
-  });
+  if (!data.length) { tb.innerHTML=`<tr><td colspan="9">${empty('📋','No hay registros que coincidan.')}</td></tr>`; return; }
+  tb.innerHTML=data.map(n=>`<tr>
+    <td style="font-weight:700;color:var(--muted)">#${n.id}</td>
+    <td class="tdm" style="white-space:nowrap;font-size:.72rem">${n.fecha}</td>
+    <td><span class="badge b-${n.zona?.toLowerCase()==='norte'?'norte':'sur'}">${n.zona}</span></td>
+    <td style="font-size:.8rem">${n.concesion}</td>
+    <td style="font-size:.8rem">${n.puesto}</td>
+    <td><span class="badge b-area">${n.area}</span></td>
+    <td class="tdm">${n.tipo}</td>
+    <td><span class="badge b-${n.nivel.toLowerCase()}">${n.nivel}</span></td>
+    <td class="tdm">${n.name}</td>
+  </tr>`).join('');
 }
 function fh(v) { fBq=v; renderTbl(); }
 function fa2(v) { fAr=v; renderTbl(); }

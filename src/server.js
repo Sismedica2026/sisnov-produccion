@@ -702,6 +702,158 @@ app.get('/api/reportes/resumen', auth, async (req, res) => {
   }
 });
 
+
+// ============================================================
+// RUTA POWER BI / KPIs GERENCIALES
+// IMPORTANTE: esta ruta debe estar ANTES del fallback app.get('*')
+// para evitar que Power BI reciba index.html en vez de JSON.
+// ============================================================
+function extractBiToken(req) {
+  const authorization = req.get('authorization') || '';
+  const bearer = authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : '';
+  return (
+    req.get('x-api-key') ||
+    req.get('x-bi-token') ||
+    bearer ||
+    req.query.api_key ||
+    req.query.token ||
+    ''
+  ).trim();
+}
+
+function requireBiToken(req, res, next) {
+  const expected = String(process.env.BI_API_TOKEN || '').trim();
+  if (!expected) {
+    return res.status(503).type('application/json').json({
+      error: 'BI_API_TOKEN no configurado en el servidor'
+    });
+  }
+  const received = extractBiToken(req);
+  if (received !== expected) {
+    return res.status(401).type('application/json').json({ error: 'Token BI inválido o ausente' });
+  }
+  next();
+}
+
+async function tableColumns(tableName) {
+  const result = await pool.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = $1
+  `, [tableName]);
+  return new Set(result.rows.map(r => r.column_name));
+}
+
+function sqlCol(cols, name, alias, fallback = 'NULL') {
+  return cols.has(name) ? `n.${name} AS ${alias || name}` : `${fallback} AS ${alias || name}`;
+}
+
+app.get('/api/bi/kpis', requireBiToken, async (req, res) => {
+  res.type('application/json');
+  try {
+    const cols = await tableColumns('novedades');
+    const estadoExpr = cols.has('estado') ? 'n.estado' : "'ABIERTA'";
+    const fechaCierreExpr = cols.has('cerrado_en') ? 'n.cerrado_en' : (cols.has('fecha_cierre') ? 'n.fecha_cierre' : 'NULL');
+    const gestionExpr = cols.has('gestion') ? 'n.gestion' : (cols.has('observacion_gestion') ? 'n.observacion_gestion' : 'NULL');
+    const responsableExpr = cols.has('responsable_cierre') ? 'n.responsable_cierre' : (cols.has('gestionado_por') ? 'n.gestionado_por' : 'NULL');
+
+    const novedadesSql = `
+      SELECT
+        n.id,
+        n.zona,
+        n.concesion,
+        n.puesto,
+        ${sqlCol(cols, 'movil', 'placa')},
+        n.area,
+        n.tipo_novedad AS tipo,
+        n.nivel AS criticidad,
+        ${estadoExpr} AS estado,
+        n.descripcion AS hallazgo_descripcion,
+        n.registrado_por,
+        n.nombre_supervisor AS supervisor,
+        ${gestionExpr} AS gestion_observacion,
+        ${responsableExpr} AS responsable_cierre,
+        n.creado_en,
+        ${fechaCierreExpr} AS cerrado_en,
+        CASE
+          WHEN ${fechaCierreExpr} IS NOT NULL THEN ROUND(EXTRACT(EPOCH FROM (${fechaCierreExpr} - n.creado_en))/3600, 2)
+          ELSE NULL
+        END AS horas_cierre
+      FROM novedades n
+      ORDER BY n.creado_en DESC
+      LIMIT 5000
+    `;
+
+    const [novedadesResult, criticidadesResult, responsablesResult, concesionesResult, cierresResult, resumenResult] = await Promise.all([
+      pool.query(novedadesSql),
+      pool.query(`
+        SELECT nivel AS criticidad, COUNT(*)::int AS total
+        FROM novedades
+        GROUP BY nivel
+        ORDER BY total DESC
+      `),
+      pool.query(`
+        SELECT COALESCE(nombre_supervisor, registrado_por, 'SIN RESPONSABLE') AS responsable, COUNT(*)::int AS total
+        FROM novedades
+        GROUP BY COALESCE(nombre_supervisor, registrado_por, 'SIN RESPONSABLE')
+        ORDER BY total DESC
+        LIMIT 50
+      `),
+      pool.query(`
+        SELECT concesion, COUNT(*)::int AS total
+        FROM novedades
+        GROUP BY concesion
+        ORDER BY total DESC
+        LIMIT 100
+      `),
+      pool.query(`
+        SELECT TO_CHAR(creado_en::date, 'YYYY-MM-DD') AS fecha, COUNT(*)::int AS total
+        FROM novedades
+        GROUP BY creado_en::date
+        ORDER BY fecha DESC
+        LIMIT 180
+      `),
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total_novedades,
+          SUM(CASE WHEN nivel = 'CRITICA' THEN 1 ELSE 0 END)::int AS criticas,
+          SUM(CASE WHEN nivel = 'MEDIA' THEN 1 ELSE 0 END)::int AS medias,
+          SUM(CASE WHEN nivel = 'BAJA' THEN 1 ELSE 0 END)::int AS bajas
+        FROM novedades
+      `)
+    ]);
+
+    const novedades = novedadesResult.rows;
+    const abiertas = novedades.filter(n => String(n.estado || '').toUpperCase() === 'ABIERTA').length;
+    const gestion = novedades.filter(n => ['GESTION', 'EN GESTION', 'EN_GESTION'].includes(String(n.estado || '').toUpperCase())).length;
+    const cerradas = novedades.filter(n => String(n.estado || '').toUpperCase() === 'CERRADA').length;
+    const cierresConTiempo = novedades.filter(n => n.horas_cierre !== null && n.horas_cierre !== undefined);
+    const promedioHorasCierre = cierresConTiempo.length
+      ? Number((cierresConTiempo.reduce((acc, n) => acc + Number(n.horas_cierre || 0), 0) / cierresConTiempo.length).toFixed(2))
+      : null;
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      generado_en: new Date().toISOString(),
+      resumen: {
+        ...(resumenResult.rows[0] || {}),
+        abiertas,
+        en_gestion: gestion,
+        cerradas,
+        promedio_horas_cierre: promedioHorasCierre
+      },
+      novedades,
+      criticidades: criticidadesResult.rows,
+      responsables: responsablesResult.rows,
+      concesiones: concesionesResult.rows,
+      cierres_diarios: cierresResult.rows
+    });
+  } catch (e) {
+    console.error('BI KPIs error:', e);
+    res.status(500).json({ error: 'Error generando KPIs BI', detalle: isProduction ? undefined : e.message });
+  }
+});
+
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 
 // ── Servir el frontend para cualquier ruta ───────────────────
