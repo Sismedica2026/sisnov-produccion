@@ -1321,3 +1321,312 @@ renderRep = async function() {
     if (typeof cambiarEstadoNovedad === 'function') cambiarEstadoNovedad(sel.dataset.id, sel.value);
   });
 })();
+
+
+// ============================================================
+// SISNOV — Fix definitivo filtros Historial
+// Corrige búsqueda/área, agrega filtros por Estado y Criticidad,
+// y permite restaurar la tabla al limpiar filtros.
+// Cambio solo frontend. No toca usuarios, contraseñas, BD ni Power BI.
+// ============================================================
+(function sisnovHistorialFiltrosFinal(){
+  if (window.__sisnovHistorialFiltrosFinalLoaded) return;
+  window.__sisnovHistorialFiltrosFinalLoaded = true;
+
+  const HIST_FILTERS = {
+    q: '',
+    area: '',
+    criticidad: '',
+    estado: ''
+  };
+
+  function esc(v){
+    return String(v ?? '')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+
+  function norm(v){
+    return String(v ?? '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .trim().toUpperCase();
+  }
+
+  function shortText(v, max=90){
+    const s = String(v || '').replace(/\s+/g,' ').trim();
+    if (!s) return '—';
+    return s.length > max ? s.slice(0, max - 1) + '…' : s;
+  }
+
+  function parseDateSafe(v){
+    if (!v) return null;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function diasGestion(n){
+    const inicio = parseDateSafe(n.creado_en) || (n.ts ? new Date(n.ts) : null);
+    if (!inicio) return {dias:'—', texto:'Sin fecha'};
+    const estado = norm(n.estado || 'ABIERTA');
+    const cerrado = estado === 'CERRADA';
+    const fin = cerrado && n.cerrado_en ? (parseDateSafe(n.cerrado_en) || new Date()) : new Date();
+    const ms = Math.max(0, fin.getTime() - inicio.getTime());
+    const dias = Math.max(0, Math.ceil(ms / 86400000));
+    return { dias, texto: cerrado ? `${dias} día(s) al cierre` : `${dias} día(s) abierta` };
+  }
+
+  function getBaseHistorial(){
+    const base = (typeof vis === 'function') ? vis() : (Array.isArray(window.NV) ? window.NV : []);
+    return Array.isArray(base) ? base.slice() : [];
+  }
+
+  function applyHistorialFilters(list){
+    let data = Array.isArray(list) ? list.slice() : [];
+    const q = String(HIST_FILTERS.q || '').trim().toLowerCase();
+    if (q) {
+      data = data.filter(n => {
+        const blob = [
+          n.id, n.fecha, n.zona, n.concesion, n.puesto, n.movil,
+          n.area, n.tipo, n.nivel, n.estado, n.descripcion,
+          n.hallazgo_descripcion, n.descripcion_hallazgo, n.user, n.name
+        ].join(' ').toLowerCase();
+        return blob.includes(q);
+      });
+    }
+    if (HIST_FILTERS.area) {
+      data = data.filter(n => norm(n.area) === norm(HIST_FILTERS.area));
+    }
+    if (HIST_FILTERS.criticidad) {
+      data = data.filter(n => norm(n.nivel) === norm(HIST_FILTERS.criticidad));
+    }
+    if (HIST_FILTERS.estado) {
+      data = data.filter(n => norm(n.estado || 'ABIERTA') === norm(HIST_FILTERS.estado));
+    }
+    return data;
+  }
+
+  function datosHistorialFiltradosFinal(){
+    return applyHistorialFilters(getBaseHistorial());
+  }
+
+  function ensureHistorialFiltersUi(){
+    const page = document.getElementById('pg-historial');
+    if (!page) return;
+    const toolbar = page.querySelector('.tc');
+    if (!toolbar) return;
+
+    const inputs = toolbar.querySelectorAll('input,select');
+    const search = inputs[0];
+    const area = inputs[1];
+    const crit = inputs[2];
+
+    if (search && !search.id) search.id = 'hist-filter-search';
+    if (area && !area.id) area.id = 'hist-filter-area';
+    if (crit && !crit.id) crit.id = 'hist-filter-criticidad';
+
+    if (crit) {
+      const first = crit.querySelector('option[value=""]') || crit.querySelector('option:first-child');
+      if (first) first.textContent = 'Todas las criticidades';
+    }
+
+    if (!document.getElementById('hist-filter-estado')) {
+      const estado = document.createElement('select');
+      estado.className = 'si';
+      estado.id = 'hist-filter-estado';
+      estado.style.width = '145px';
+      estado.innerHTML = `
+        <option value="">Todos los estados</option>
+        <option value="ABIERTA">Abierta</option>
+        <option value="GESTION">En gestión</option>
+        <option value="CERRADA">Cerrada</option>`;
+      if (crit && crit.parentNode) crit.after(estado);
+      else toolbar.appendChild(estado);
+    }
+
+    if (!document.getElementById('hist-filter-clear')) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-s btn-sm';
+      btn.id = 'hist-filter-clear';
+      btn.textContent = 'Limpiar filtros';
+      const csv = toolbar.querySelector('button');
+      if (csv) csv.before(btn);
+      else toolbar.appendChild(btn);
+    }
+
+    if (toolbar.dataset.historialFilterBound === '1') return;
+    toolbar.dataset.historialFilterBound = '1';
+
+    toolbar.addEventListener('input', function(e){
+      if (e.target && e.target.id === 'hist-filter-search') {
+        HIST_FILTERS.q = e.target.value || '';
+        safeRenderTbl();
+      }
+    });
+
+    toolbar.addEventListener('change', function(e){
+      const t = e.target;
+      if (!t) return;
+      if (t.id === 'hist-filter-area') HIST_FILTERS.area = t.value || '';
+      if (t.id === 'hist-filter-criticidad') HIST_FILTERS.criticidad = t.value || '';
+      if (t.id === 'hist-filter-estado') HIST_FILTERS.estado = t.value || '';
+      if (['hist-filter-area','hist-filter-criticidad','hist-filter-estado'].includes(t.id)) safeRenderTbl();
+    });
+
+    toolbar.addEventListener('click', function(e){
+      const clear = e.target && e.target.closest && e.target.closest('#hist-filter-clear');
+      if (!clear) return;
+      e.preventDefault();
+      HIST_FILTERS.q = '';
+      HIST_FILTERS.area = '';
+      HIST_FILTERS.criticidad = '';
+      HIST_FILTERS.estado = '';
+      const search = document.getElementById('hist-filter-search');
+      const area = document.getElementById('hist-filter-area');
+      const crit = document.getElementById('hist-filter-criticidad');
+      const estado = document.getElementById('hist-filter-estado');
+      if (search) search.value = '';
+      if (area) area.value = '';
+      if (crit) crit.value = '';
+      if (estado) estado.value = '';
+      safeRenderTbl();
+    });
+  }
+
+  function ensureHistorialHeader(){
+    const page = document.getElementById('pg-historial');
+    if (!page) return;
+    const tr = page.querySelector('table thead tr');
+    if (!tr) return;
+    tr.innerHTML = `
+      <th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th>
+      <th>Área</th><th>Tipo</th><th>Criticidad</th><th>Estado</th>
+      <th>Días abierta / cierre</th><th>Descripción del Hallazgo</th><th>Supervisor</th><th>Gestión</th>`;
+  }
+
+  function isTodayRecord(n){
+    const d = parseDateSafe(n.creado_en) || (n.ts ? new Date(n.ts) : null);
+    if (!d) return false;
+    const now = new Date();
+    return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth() && d.getDate()===now.getDate();
+  }
+
+  function renderDonaSupervisoresFinal(){
+    const page = document.getElementById('pg-historial');
+    if (!page) return;
+    if (!document.getElementById('hist-dona-supervisores')) {
+      const card = document.createElement('div');
+      card.id = 'hist-dona-supervisores';
+      card.className = 'card';
+      card.style.marginBottom = '14px';
+      card.innerHTML = `<div class="ch"><div class="ct2">🍩 Participación diaria por supervisor</div><div class="tdm">Novedades registradas hoy dentro del alcance visible y filtros aplicados</div></div><div id="hist-dona-body"></div>`;
+      const toolbar = page.querySelector('.toolbar') || page.querySelector('.tc');
+      if (toolbar && toolbar.parentElement) toolbar.parentElement.before(card);
+      else page.prepend(card);
+    }
+    const el = document.getElementById('hist-dona-body');
+    if (!el) return;
+    const data = datosHistorialFiltradosFinal().filter(isTodayRecord);
+    if (!data.length) {
+      el.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:.82rem">Sin novedades registradas hoy para graficar con los filtros actuales.</div>`;
+      return;
+    }
+    const counts = {};
+    data.forEach(n=>{
+      const key = n.name || n.nombre_supervisor || n.user || n.registrado_por || 'Sin supervisor';
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    const rows = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+    const total = rows.reduce((a,r)=>a+r[1],0) || 1;
+    const palette = ['#294996','#e42421','#1a7a3c','#f0a832','#8b5cf6','#1abc9c','#e67e22','#5a6e9a','#0f766e','#be185d'];
+    let acc = 0;
+    const parts = rows.map(([name,count],i)=>{
+      const pct = count/total*100;
+      const start = acc; acc += pct;
+      return `${palette[i % palette.length]} ${start.toFixed(2)}% ${acc.toFixed(2)}%`;
+    }).join(', ');
+    el.innerHTML = `<div style="display:grid;grid-template-columns:160px 1fr;gap:18px;align-items:center">
+      <div style="width:148px;height:148px;border-radius:50%;background:conic-gradient(${parts});position:relative;margin:auto;box-shadow:0 8px 22px rgba(0,0,0,.08)">
+        <div style="position:absolute;inset:34px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;text-align:center;font-weight:800;color:var(--text)">${total}<br><span style="font-size:.65rem;color:var(--muted);font-weight:600">hoy</span></div>
+      </div>
+      <div>${rows.map(([name,count],i)=>{
+        const pct = (count/total*100).toFixed(1);
+        return `<div style="display:grid;grid-template-columns:14px 1fr auto auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
+          <span style="width:10px;height:10px;border-radius:50%;background:${palette[i % palette.length]};display:inline-block"></span>
+          <span style="font-size:.78rem;font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name)}</span>
+          <span class="tdm">${count}</span>
+          <span class="badge b-area">${pct}%</span>
+        </div>`;
+      }).join('')}</div>
+    </div>`;
+  }
+
+  function safeRenderTbl(){
+    ensureHistorialFiltersUi();
+    ensureHistorialHeader();
+    const data = datosHistorialFiltradosFinal();
+    const tcount = document.getElementById('tcount');
+    if (tcount) {
+      const parts = [];
+      if (HIST_FILTERS.q) parts.push(`búsqueda: "${HIST_FILTERS.q}"`);
+      if (HIST_FILTERS.area) parts.push(`área: ${HIST_FILTERS.area}`);
+      if (HIST_FILTERS.criticidad) parts.push(`criticidad: ${HIST_FILTERS.criticidad}`);
+      if (HIST_FILTERS.estado) parts.push(`estado: ${HIST_FILTERS.estado}`);
+      tcount.textContent = `Mostrando ${data.length} novedad(es)` + (parts.length ? ` · Filtros: ${parts.join(' · ')}` : '');
+    }
+    const tb = document.getElementById('tbody');
+    if (!tb) return;
+    if (!data.length) {
+      tb.innerHTML = `<tr><td colspan="13">${typeof empty==='function'?empty('📋','No hay registros que coincidan. Limpie filtros o cambie criterios.'):'No hay registros que coincidan. Limpie filtros o cambie criterios.'}</td></tr>`;
+      renderDonaSupervisoresFinal();
+      return;
+    }
+    tb.innerHTML = data.map(n=>{
+      const d = diasGestion(n);
+      const desc = n.descripcion || n.hallazgo_descripcion || n.descripcion_hallazgo || '';
+      const estado = n.estado || 'ABIERTA';
+      const nivel = n.nivel || 'BAJA';
+      const zona = n.zona || '—';
+      return `<tr>
+        <td style="font-weight:700;color:var(--muted)">#${esc(n.id)}</td>
+        <td class="tdm" style="white-space:nowrap;font-size:.72rem">${esc(n.fecha || '')}</td>
+        <td><span class="badge b-${String(zona).toLowerCase()==='norte'?'norte':'sur'}">${esc(zona)}</span></td>
+        <td style="font-size:.8rem">${esc(n.concesion)}</td>
+        <td style="font-size:.8rem">${esc(n.puesto)}</td>
+        <td><span class="badge b-area">${esc(n.area)}</span></td>
+        <td class="tdm">${esc(n.tipo)}</td>
+        <td><span class="badge b-${String(nivel).toLowerCase()}">${esc(nivel)}</span></td>
+        <td>${typeof estadoBadge==='function'?estadoBadge(estado):`<span class="badge b-area">${esc(estado)}</span>`}</td>
+        <td class="tdm" title="${esc(d.texto)}"><b>${esc(d.dias)}</b><br><span style="font-size:.65rem">${norm(estado)==='CERRADA'?'al cierre':'abierta'}</span></td>
+        <td style="max-width:260px;font-size:.76rem;line-height:1.35" title="${esc(desc)}">${esc(shortText(desc, 90))}</td>
+        <td class="tdm">${esc(n.name)}</td>
+        <td><select class="si" data-hist-estado="1" data-id="${esc(n.id)}" style="font-size:.72rem;padding:5px"><option value="">Cambiar...</option><option value="ABIERTA">Abierta</option><option value="GESTION">Gestión</option><option value="CERRADA">Cerrada</option></select></td>
+      </tr>`;
+    }).join('');
+    renderDonaSupervisoresFinal();
+  }
+
+  window.renderTbl = safeRenderTbl;
+  window.fh = function(v){ HIST_FILTERS.q = v || ''; safeRenderTbl(); };
+  window.fa2 = function(v){ HIST_FILTERS.area = v || ''; safeRenderTbl(); };
+  window.fn2 = function(v){ HIST_FILTERS.criticidad = v || ''; safeRenderTbl(); };
+  window.fe2 = function(v){ HIST_FILTERS.estado = v || ''; safeRenderTbl(); };
+
+  const prevRenderHist = window.renderHist;
+  if (typeof prevRenderHist === 'function') {
+    window.renderHist = async function(){
+      await prevRenderHist.apply(this, arguments);
+      ensureHistorialFiltersUi();
+      safeRenderTbl();
+    };
+  }
+
+  document.addEventListener('change', function(e){
+    const sel = e.target && e.target.closest && e.target.closest('select[data-hist-estado]');
+    if (!sel || !sel.value) return;
+    if (typeof cambiarEstadoNovedad === 'function') cambiarEstadoNovedad(sel.dataset.id, sel.value);
+  });
+})();
