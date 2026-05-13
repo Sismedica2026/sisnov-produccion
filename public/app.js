@@ -35,6 +35,24 @@ let uFilter = 'todos', uSearch = '';
 let ctrlFilter = 'todos';
 let nov = [];
 
+// ── TEXT HELPERS ───────────────────────────────────────────
+function safeText(v) {
+  return String(v ?? '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+function shortText(v, max=85) {
+  const s = String(v ?? '').replace(/\s+/g,' ').trim();
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+function hallazgoText(n) {
+  return n.descripcion || n.hallazgo_descripcion || n.hallazgo || n.descripcion_hallazgo || '—';
+}
+
+
 // ── CATALOG ───────────────────────────────────────────────
 const CAT = {
   NORTE: {
@@ -434,18 +452,25 @@ function renderTbl() {
   if (fNv) data=data.filter(n=>n.nivel===fNv);
   document.getElementById('tcount').textContent=`Mostrando ${data.length} novedad(es)`;
   const tb=document.getElementById('tbody');
-  if (!data.length) { tb.innerHTML=`<tr><td colspan="9">${empty('📋','No hay registros que coincidan.')}</td></tr>`; return; }
-  tb.innerHTML=data.map(n=>`<tr>
-    <td style="font-weight:700;color:var(--muted)">#${n.id}</td>
-    <td class="tdm" style="white-space:nowrap;font-size:.72rem">${n.fecha}</td>
-    <td><span class="badge b-${n.zona?.toLowerCase()==='norte'?'norte':'sur'}">${n.zona}</span></td>
-    <td style="font-size:.8rem">${n.concesion}</td>
-    <td style="font-size:.8rem">${n.puesto}</td>
-    <td><span class="badge b-area">${n.area}</span></td>
-    <td class="tdm">${n.tipo}</td>
-    <td><span class="badge b-${n.nivel.toLowerCase()}">${n.nivel}</span></td>
-    <td class="tdm">${n.name}</td>
-  </tr>`).join('');
+  if (!data.length) { tb.innerHTML=`<tr><td colspan="10">${empty('📋','No hay registros que coincidan.')}</td></tr>`; return; }
+  tb.innerHTML=data.map(n=>{
+    const hallazgoCompleto = safeText(hallazgoText(n));
+    const hallazgoResumen = safeText(shortText(hallazgoText(n), 95));
+    return `<tr>
+      <td style="font-weight:700;color:var(--muted)">#${n.id}</td>
+      <td class="tdm" style="white-space:nowrap;font-size:.72rem">${safeText(n.fecha)}</td>
+      <td><span class="badge b-${n.zona?.toLowerCase()==='norte'?'norte':'sur'}">${safeText(n.zona)}</span></td>
+      <td style="font-size:.8rem">${safeText(n.concesion)}</td>
+      <td style="font-size:.8rem">${safeText(n.puesto)}</td>
+      <td><span class="badge b-area">${safeText(n.area)}</span></td>
+      <td class="tdm">${safeText(n.tipo)}</td>
+      <td><span class="badge b-${String(n.nivel||'').toLowerCase()}">${safeText(n.nivel)}</span></td>
+      <td class="tdm">${safeText(n.name)}</td>
+      <td class="tdm hallazgo-cell" title="${hallazgoCompleto}">
+        <span>${hallazgoResumen}</span>
+      </td>
+    </tr>`;
+  }).join('');
 }
 function fh(v) { fBq=v; renderTbl(); }
 function fa2(v) { fAr=v; renderTbl(); }
