@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS catalogo_placas (
   UNIQUE(zona, concesion, puesto, placa)
 );
 
-CREATE INDEX IF NOT EXISTS idx_novedades_estado ON novedades(estado);
+-- idx_novedades_estado se crea en ensureMigrations() después de garantizar la columna estado.
 CREATE INDEX IF NOT EXISTS idx_catalogo_concesiones_zona ON catalogo_concesiones(zona);
 CREATE INDEX IF NOT EXISTS idx_catalogo_puestos_lookup ON catalogo_puestos(zona, concesion);
 CREATE INDEX IF NOT EXISTS idx_catalogo_placas_lookup ON catalogo_placas(zona, concesion, puesto);
