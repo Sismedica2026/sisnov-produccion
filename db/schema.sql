@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS novedades (
   descripcion TEXT NOT NULL,
   registrado_por VARCHAR(50) REFERENCES usuarios(username),
   nombre_supervisor VARCHAR(100),
+  estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA' CHECK (estado IN ('ABIERTA','GESTION','CERRADA')),
+  gestionado_por VARCHAR(50),
+  cerrado_en TIMESTAMP,
+  actualizado_en TIMESTAMP DEFAULT NOW(),
   creado_en TIMESTAMP DEFAULT NOW()
 );
 
@@ -61,6 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_novedades_zona ON novedades(zona);
 CREATE INDEX IF NOT EXISTS idx_novedades_fecha ON novedades(creado_en);
 CREATE INDEX IF NOT EXISTS idx_novedades_usuario ON novedades(registrado_por);
 CREATE INDEX IF NOT EXISTS idx_novedades_nivel ON novedades(nivel);
+CREATE INDEX IF NOT EXISTS idx_novedades_estado ON novedades(estado);
 CREATE INDEX IF NOT EXISTS idx_asignaciones_user ON asignaciones(username);
 
 -- Datos iniciales: por seguridad no se cargan usuarios demo en producción.

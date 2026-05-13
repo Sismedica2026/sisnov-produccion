@@ -25,7 +25,7 @@ const AVC = {
 };
 
 // ── STATE ─────────────────────────────────────────────────
-let CU = null, NV = "", fBq = "", fAr = "", fNv = "";
+let CU = null, NV = "", fBq = "", fAr = "", fNv = "", fEstado = "";
 let itmr = null, iwmr = null, iwc = 30;
 let asignUser = null;
 const asignHistory = {};
@@ -35,23 +35,32 @@ let uFilter = 'todos', uSearch = '';
 let ctrlFilter = 'todos';
 let nov = [];
 
-// ── TEXT HELPERS ───────────────────────────────────────────
-function safeText(v) {
-  return String(v ?? '')
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;')
-    .replace(/'/g,'&#39;');
-}
-function shortText(v, max=85) {
-  const s = String(v ?? '').replace(/\s+/g,' ').trim();
-  return s.length > max ? s.slice(0, max - 1) + '…' : s;
-}
-function hallazgoText(n) {
-  return n.descripcion || n.hallazgo_descripcion || n.hallazgo || n.descripcion_hallazgo || '—';
-}
 
+// ── UI HELPERS ─────────────────────────────────────────────
+function esc(v) {
+  return String(v ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+function shortText(v, max = 72) {
+  const txt = String(v || '').trim().replace(/\s+/g, ' ');
+  return txt.length > max ? txt.slice(0, max - 1) + '…' : txt;
+}
+function normEstado(v) {
+  const raw = String(v || 'ABIERTA').toUpperCase().replace(/\s+/g, '_');
+  if (['GESTION','EN_GESTION'].includes(raw)) return 'GESTION';
+  if (raw === 'CERRADA') return 'CERRADA';
+  return 'ABIERTA';
+}
+function estadoLabel(v) {
+  return { ABIERTA: 'ABIERTA', GESTION: 'EN GESTIÓN', CERRADA: 'CERRADA' }[normEstado(v)] || 'ABIERTA';
+}
+function estadoBadge(v) {
+  const e = normEstado(v);
+  const cls = e === 'CERRADA' ? 'b-baja' : (e === 'GESTION' ? 'b-media' : 'b-critica');
+  return `<span class="badge ${cls}">${estadoLabel(e)}</span>`;
+}
+function canManageEstado() {
+  return CU && ['admin','gerente','director-norte','director-sur','coordinador-norte','coordinador-sur'].includes(CU.rol);
+}
 
 // ── CATALOG ───────────────────────────────────────────────
 const CAT = {
@@ -407,9 +416,9 @@ async function renderDash() {
     ?`Mis novedades — ${(CU.concesiones||[]).join(', ')} (${CU.zona})`
     :`${data.length} novedades visibles según su nivel de acceso`;
   document.getElementById('s0').textContent=data.length;
-  document.getElementById('s1').textContent=data.filter(n=>n.nivel==='CRITICA').length;
-  document.getElementById('s2').textContent=data.filter(n=>n.nivel==='MEDIA').length;
-  document.getElementById('s3').textContent=data.filter(n=>n.nivel==='BAJA').length;
+  document.getElementById('s1').textContent=data.filter(n=>normEstado(n.estado)==='ABIERTA').length;
+  document.getElementById('s2').textContent=data.filter(n=>normEstado(n.estado)==='GESTION').length;
+  document.getElementById('s3').textContent=data.filter(n=>normEstado(n.estado)==='CERRADA').length;
   barchart(data,'area',document.getElementById('d-area'),{MANTENIMIENTO:'#e42421',INSUMOS:'#f0a832',BIOMEDICOS:'#294996',TH:'#1a7a3c',TECNOLOGIA:'#8b5cf6',SST:'#e67e22',NOMINA:'#1abc9c'});
   const rec=[...data].slice(0,5);
   const rd=document.getElementById('d-rec');
@@ -419,9 +428,10 @@ async function renderDash() {
       <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
         <span class="badge b-area">${n.area}</span>
         <span class="badge b-${n.nivel.toLowerCase()}">${n.nivel}</span>
+        ${estadoBadge(n.estado)}
       </div>
-      <div style="font-weight:500">${n.puesto} — <span style="color:var(--muted)">${n.concesion}</span></div>
-      <div style="color:var(--muted);font-size:.7rem;margin-top:2px">${n.tipo} · ${n.name} · ${n.fecha}</div>
+      <div style="font-weight:500">${esc(n.puesto)} — <span style="color:var(--muted)">${esc(n.concesion)}</span></div>
+      <div style="color:var(--muted);font-size:.7rem;margin-top:2px">${esc(n.tipo)} · ${esc(n.name)} · ${n.fecha}</div>
     </div>`).join('');
   const cc=document.getElementById('d-concard');
   if (r!=='supervisor') { cc.style.display='block'; barchart(data,'concesion',document.getElementById('d-con')); }
@@ -450,37 +460,61 @@ function renderTbl() {
   if (fBq) { const q=fBq.toLowerCase(); data=data.filter(n=>JSON.stringify(n).toLowerCase().includes(q)); }
   if (fAr) data=data.filter(n=>n.area===fAr);
   if (fNv) data=data.filter(n=>n.nivel===fNv);
+  if (fEstado) data=data.filter(n=>normEstado(n.estado)===fEstado);
   document.getElementById('tcount').textContent=`Mostrando ${data.length} novedad(es)`;
   const tb=document.getElementById('tbody');
-  if (!data.length) { tb.innerHTML=`<tr><td colspan="10">${empty('📋','No hay registros que coincidan.')}</td></tr>`; return; }
+  if (!data.length) { tb.innerHTML=`<tr><td colspan="11">${empty('📋','No hay registros que coincidan.')}</td></tr>`; return; }
   tb.innerHTML=data.map(n=>{
-    const hallazgoCompleto = safeText(hallazgoText(n));
-    const hallazgoResumen = safeText(shortText(hallazgoText(n), 95));
+    const hallazgo = n.descripcion || n.hallazgo_descripcion || '';
+    const estado = normEstado(n.estado);
+    const estadoCell = canManageEstado()
+      ? `<select class="si estado-select" onchange="cambiarEstado(${n.id}, this.value)" title="Cambiar estado de la novedad #${n.id}">
+          <option value="ABIERTA" ${estado==='ABIERTA'?'selected':''}>Abierta</option>
+          <option value="GESTION" ${estado==='GESTION'?'selected':''}>En gestión</option>
+          <option value="CERRADA" ${estado==='CERRADA'?'selected':''}>Cerrada</option>
+        </select>`
+      : estadoBadge(estado);
     return `<tr>
       <td style="font-weight:700;color:var(--muted)">#${n.id}</td>
-      <td class="tdm" style="white-space:nowrap;font-size:.72rem">${safeText(n.fecha)}</td>
-      <td><span class="badge b-${n.zona?.toLowerCase()==='norte'?'norte':'sur'}">${safeText(n.zona)}</span></td>
-      <td style="font-size:.8rem">${safeText(n.concesion)}</td>
-      <td style="font-size:.8rem">${safeText(n.puesto)}</td>
-      <td><span class="badge b-area">${safeText(n.area)}</span></td>
-      <td class="tdm">${safeText(n.tipo)}</td>
-      <td><span class="badge b-${String(n.nivel||'').toLowerCase()}">${safeText(n.nivel)}</span></td>
-      <td class="tdm">${safeText(n.name)}</td>
-      <td class="tdm hallazgo-cell" title="${hallazgoCompleto}">
-        <span>${hallazgoResumen}</span>
-      </td>
+      <td class="tdm" style="white-space:nowrap;font-size:.72rem">${esc(n.fecha)}</td>
+      <td><span class="badge b-${n.zona?.toLowerCase()==='norte'?'norte':'sur'}">${esc(n.zona)}</span></td>
+      <td style="font-size:.8rem">${esc(n.concesion)}</td>
+      <td style="font-size:.8rem">${esc(n.puesto)}</td>
+      <td><span class="badge b-area">${esc(n.area)}</span></td>
+      <td class="tdm">${esc(n.tipo)}</td>
+      <td><span class="badge b-${String(n.nivel||'').toLowerCase()}">${esc(n.nivel)}</span></td>
+      <td class="td-hallazgo" title="${esc(hallazgo)}">${esc(shortText(hallazgo, 90))}</td>
+      <td>${estadoCell}</td>
+      <td class="tdm">${esc(n.name)}</td>
     </tr>`;
   }).join('');
 }
 function fh(v) { fBq=v; renderTbl(); }
 function fa2(v) { fAr=v; renderTbl(); }
 function fn2(v) { fNv=v; renderTbl(); }
+function fe2(v) { fEstado=v; renderTbl(); }
+
+async function cambiarEstado(id, estado) {
+  const estadoAnterior = (nov.find(n => Number(n.id) === Number(id)) || {}).estado || 'ABIERTA';
+  try {
+    const data = await API.patch(`/api/novedades/${id}/estado`, { estado });
+    const idx = nov.findIndex(n => Number(n.id) === Number(id));
+    if (idx >= 0) nov[idx] = { ...nov[idx], ...data.novedad, fecha: data.novedad.fecha_formato || nov[idx].fecha, tipo: data.novedad.tipo_novedad || nov[idx].tipo, user: data.novedad.registrado_por || nov[idx].user, name: data.novedad.nombre_supervisor || nov[idx].name };
+    renderTbl();
+    renderDash();
+  } catch(e) {
+    alert('No se pudo cambiar el estado: ' + (e.message || 'Error del servidor'));
+    const item = nov.find(n => Number(n.id) === Number(id));
+    if (item) item.estado = estadoAnterior;
+    renderTbl();
+  }
+}
 
 function exportCSV() {
   const data=vis();
   if (!data.length) { alert('Sin datos para exportar.'); return; }
-  const h=['ID','Fecha','Zona','Concesion','Puesto','Movil','Area','Tipo','Nivel','Descripcion','Usuario','Nombre'];
-  const rows=data.map(n=>[n.id,n.fecha,n.zona,n.concesion,n.puesto,n.movil||'—',n.area,n.tipo,n.nivel,
+  const h=['ID','Fecha','Zona','Concesion','Puesto','Movil','Area','Tipo','Nivel','Estado','Descripcion','Usuario','Nombre'];
+  const rows=data.map(n=>[n.id,n.fecha,n.zona,n.concesion,n.puesto,n.movil||'—',n.area,n.tipo,n.nivel,estadoLabel(n.estado),
     `"${(n.descripcion||'').replace(/"/g,'""')}"`,n.user,n.name].join(','));
   const csv=[h.join(','),...rows].join('\n');
   const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
@@ -503,6 +537,7 @@ async function renderRep() {
     };
     mkChart(data.porArea,'area',document.getElementById('r-area'),{MANTENIMIENTO:'#e42421',INSUMOS:'#f0a832',BIOMEDICOS:'#294996',TH:'#1a7a3c',TECNOLOGIA:'#8b5cf6',SST:'#e67e22',NOMINA:'#1abc9c'});
     mkChart(data.porNivel,'nivel',document.getElementById('r-niv'),{BAJA:'#1a7a3c',MEDIA:'#f0a832',CRITICA:'#e42421'});
+    if (data.porEstado) mkChart(data.porEstado,'estado',document.getElementById('r-est'),{ABIERTA:'#e42421',GESTION:'#f0a832',CERRADA:'#1a7a3c'});
     mkChart(data.porConcesion,'concesion',document.getElementById('r-con'));
     const rz=document.getElementById('r-zona-card');
     if (CU.rol==='admin'||CU.rol==='gerente') {
