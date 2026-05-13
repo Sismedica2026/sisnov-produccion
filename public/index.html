@@ -122,9 +122,6 @@ thead th{background:#294996;color:#fff;font-size:.63rem;text-transform:uppercase
 tbody tr{border-bottom:1px solid var(--border);transition:var(--t);}
 tbody tr:hover{background:rgba(255,255,255,.02);}
 td{padding:9px 12px;vertical-align:middle;}
-.hallazgo-cell{min-width:260px;max-width:360px;white-space:normal;line-height:1.25;color:var(--text);}
-.hallazgo-cell span{display:block;max-height:2.7em;overflow:hidden;}
-
 .tdm{color:var(--muted);font-size:.74rem;}
 /* BADGES */
 .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:.65rem;font-weight:700;letter-spacing:.3px;}
@@ -132,6 +129,9 @@ td{padding:9px 12px;vertical-align:middle;}
 .b-media{background:rgba(240,168,50,.12);color:var(--gold);}
 .b-critica{background:rgba(231,76,60,.12);color:var(--red);}
 .b-area{background:rgba(61,127,255,.1);color:var(--accent2);}
+.b-abierta{background:rgba(231,76,60,.12);color:var(--red);}
+.b-gestion{background:rgba(240,168,50,.14);color:var(--gold);}
+.b-cerrada{background:rgba(46,204,113,.13);color:var(--green);}
 .b-norte{background:rgba(61,127,255,.1);color:var(--nord);}
 .b-sur{background:rgba(155,89,182,.1);color:var(--sur);}
 /* EMPTY */
@@ -242,9 +242,15 @@ td{padding:9px 12px;vertical-align:middle;}
       <button class="lbtn" onclick="doLogin()">Ingresar al Sistema →</button>
       <div class="lfooter">🔒 Sesión cifrada · Auditada · ISO 27001 · Ley 1581 Colombia</div>
     </div>
-    <div class="lhint"><b>Acceso seguro:</b><br>
-      Use únicamente las credenciales asignadas por el administrador del sistema.<br>
-      Por seguridad, las credenciales de prueba fueron retiradas de la interfaz pública.
+    <div class="lhint"><b>Credenciales de prueba:</b><br>
+      <b>admin1</b> / admin123 <span class="rbs" style="background:rgba(228,36,33,.2);color:#e42421">ADMIN</span> &nbsp;
+      <b>admin2</b> / admin123 <span class="rbs" style="background:rgba(228,36,33,.2);color:#e42421">ADMIN</span><br>
+      <b>gerente</b> / gerente123 <span class="rbs" style="background:rgba(240,168,50,.2);color:var(--gold)">GERENTE</span><br>
+      <b>dir.norte</b> / norte123 <span class="rbs" style="background:rgba(41,73,150,.2);color:#294996">DIR NORTE</span> &nbsp;
+      <b>dir.sur</b> / sur123 <span class="rbs" style="background:rgba(90,110,154,.2);color:#5a6e9a">DIR SUR</span><br>
+      <b>coord.norte</b> / cnorte123 <span class="rbs" style="background:rgba(14,122,78,.2);color:#0e7a4e">COORD NORTE</span> &nbsp;
+      <b>coord.sur</b> / csur123 <span class="rbs" style="background:rgba(14,122,78,.2);color:#0e7a4e">COORD SUR</span><br>
+      <b>sup01</b>–<b>sup20</b> / sup123 <span class="rbs" style="background:rgba(26,122,60,.2);color:#1a7a3c">SUPERVISOR</span>
     </div>
   </div>
 </div>
@@ -278,6 +284,7 @@ td{padding:9px 12px;vertical-align:middle;}
           <div class="card"><div class="ch"><div class="ct2">📊 Por Área</div></div><div id="d-area"></div></div>
           <div class="card"><div class="ch"><div class="ct2">⏱ Últimas Novedades</div></div><div id="d-rec"></div></div>
         </div>
+        <div class="card"><div class="ch"><div class="ct2">🔁 Por Estado</div></div><div id="d-est"></div></div>
         <div class="card" id="d-concard" style="display:none"><div class="ch"><div class="ct2">🗺 Por Concesión</div></div><div id="d-con"></div></div>
       </div>
 
@@ -342,9 +349,10 @@ td{padding:9px 12px;vertical-align:middle;}
             <input type="text" class="si" style="flex:1;max-width:250px;" placeholder="🔍 Buscar..." oninput="fh(this.value)">
             <select class="si" style="width:155px;" onchange="fa2(this.value)"><option value="">Todas las áreas</option><option>MANTENIMIENTO</option><option>INSUMOS</option><option>BIOMEDICOS</option><option>TH</option><option>TECNOLOGIA</option><option>SST</option><option>NOMINA</option></select>
             <select class="si" style="width:135px;" onchange="fn2(this.value)"><option value="">Todos niveles</option><option>BAJA</option><option>MEDIA</option><option>CRITICA</option></select>
+            <select class="si" style="width:150px;" onchange="fe2(this.value)"><option value="">Todos estados</option><option value="ABIERTA">Abierta</option><option value="GESTION">En gestión</option><option value="CERRADA">Cerrada</option></select>
             <button class="btn btn-s btn-sm" onclick="exportCSV()" style="margin-left:auto">⬇ CSV</button>
           </div>
-          <div class="tw"><table><thead><tr><th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th><th>Área</th><th>Tipo</th><th>Nivel</th><th>Supervisor</th><th>Descripción del Hallazgo</th></tr></thead><tbody id="tbody"></tbody></table></div>
+          <div class="tw"><table><thead><tr><th>#</th><th>Fecha/Hora</th><th>Zona</th><th>Concesión</th><th>Puesto</th><th>Área</th><th>Tipo</th><th>Nivel</th><th>Estado</th><th>Supervisor</th><th>Descripción del Hallazgo</th></tr></thead><tbody id="tbody"></tbody></table></div>
           <div style="margin-top:9px;font-size:.72rem;color:var(--muted)" id="tcount"></div>
         </div>
       </div>
@@ -357,6 +365,7 @@ td{padding:9px 12px;vertical-align:middle;}
           <div class="card"><div class="ch"><div class="ct2">📊 Por Área</div></div><div id="r-area"></div></div>
           <div class="card"><div class="ch"><div class="ct2">🎯 Por Nivel</div></div><div id="r-niv"></div></div>
         </div>
+        <div class="card"><div class="ch"><div class="ct2">🔁 Por Estado</div></div><div id="r-est"></div></div>
         <div class="card"><div class="ch"><div class="ct2">🗺 Por Concesión</div></div><div id="r-con"></div></div>
         <div class="card" id="r-zona-card" style="display:none"><div class="ch"><div class="ct2">🌍 Por Zona</div></div><div id="r-zona"></div></div>
       </div>

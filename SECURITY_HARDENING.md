@@ -31,7 +31,7 @@
 8. **Semilla demo desactivada por defecto**
    - Los usuarios con contraseña conocida ya no se crean automáticamente.
    - Para pruebas locales puede activar `SEED_DEMO_DATA=true`.
-   - En producción se crean usuarios iniciales faltantes con `INITIAL_USERS_PASSWORD` o `ADMIN_PASSWORD`, sin borrar ni modificar usuarios existentes.
+   - En producción cree el primer admin con `ADMIN_USERNAME`, `ADMIN_PASSWORD` y `ADMIN_NAME`.
 
 9. **Control de permisos en novedades**
    - Supervisores no pueden registrar novedades fuera de su zona o concesiones asignadas aunque manipulen el navegador.
@@ -47,7 +47,8 @@ NODE_ENV=production
 DATABASE_URL=postgresql://...
 JWT_SECRET=clave_aleatoria_larga_de_32_o_mas_caracteres
 ALLOWED_ORIGINS=https://su-dominio.onrender.com
-INITIAL_USERS_PASSWORD=Cambie-Esta-Clave-2026!
+ADMIN_USERNAME=admin
+ADMIN_NAME=Administrador SisNov
 ADMIN_PASSWORD=Cambie-Esta-Clave-2026!
 SEED_DEMO_DATA=false
 ```
@@ -55,33 +56,3 @@ SEED_DEMO_DATA=false
 ## Decisión importante
 
 No use `SEED_DEMO_DATA=true` en producción. Esa opción conserva usuarios de demostración con contraseña compartida y solo debe utilizarse para pruebas internas.
-
-## Ajuste aplicado para publicación
-
-- Se retiró de `public/index.html` el bloque visible con credenciales de prueba.
-- La aplicación crea o completa la estructura inicial de usuarios: 2 admin, 1 gerente, 2 directores, 2 coordinadores y 20 supervisores. Usa `ON CONFLICT DO NOTHING`, por lo que no borra ni cambia usuarios existentes.
-- En producción no deben quedar usuarios, contraseñas, tokens ni credenciales demo en HTML, JavaScript, comentarios o documentación pública.
-
-Variables mínimas para Render:
-
-```env
-DATABASE_URL=postgresql://...
-NODE_ENV=production
-JWT_SECRET=clave_larga_de_32_o_mas_caracteres
-INITIAL_USERS_PASSWORD=SisnovAdmin2026#Seguro
-ADMIN_PASSWORD=SisnovAdmin2026#Seguro
-SEED_DEMO_DATA=false
-```
-
-## Recuperación controlada de acceso inicial
-
-Si los usuarios iniciales fueron creados con una contraseña incorrecta o desconocida, se puede activar temporalmente:
-
-```env
-INITIAL_USERS_PASSWORD=SisnovAdmin2026#Seguro
-RESET_INITIAL_USERS_PASSWORD=true
-```
-
-Después del deploy exitoso y de confirmar acceso con `admin1`, cambiar `RESET_INITIAL_USERS_PASSWORD` nuevamente a `false` y desplegar otra vez.
-
-No se debe dejar `RESET_INITIAL_USERS_PASSWORD=true` de forma permanente, porque cada reinicio volvería a asignar la misma contraseña inicial a todos los usuarios bootstrap.
