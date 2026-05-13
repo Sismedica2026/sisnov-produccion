@@ -93,6 +93,33 @@ const TIP = {
   NOMINA:["MALAS LIQUIDACIONES","ERROR MARCACIONES","HORAS EXTRAS","DESCUENTOS","OTRO"],
 };
 
+
+// ── NORMALIZACIÓN VISUAL DE DATOS OPERATIVOS ───────────────
+// Convierte a MAYÚSCULA lo que el usuario escribe en campos operativos.
+// No aplica a contraseñas, usuario de login, correos, URLs ni tokens.
+function shouldUppercaseInput(el) {
+  if (!el || !['INPUT','TEXTAREA'].includes(el.tagName)) return false;
+  const type = (el.getAttribute('type') || 'text').toLowerCase();
+  const id = (el.id || '').toLowerCase();
+  const name = (el.name || '').toLowerCase();
+  if (['password','email','url','hidden'].includes(type)) return false;
+  if (['lu','lp','pwd-current','pwd-new','pwd-confirm'].includes(id)) return false;
+  if (id.includes('password') || id.includes('token') || id.includes('email') || id.includes('url')) return false;
+  if (name.includes('password') || name.includes('token') || name.includes('email') || name.includes('url')) return false;
+  return true;
+}
+document.addEventListener('input', function(e) {
+  const el = e.target;
+  if (!shouldUppercaseInput(el)) return;
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  const upper = el.value.toLocaleUpperCase('es-CO');
+  if (el.value !== upper) {
+    el.value = upper;
+    try { el.setSelectionRange(start, end); } catch {}
+  }
+}, true);
+
 // ── API CLIENT ────────────────────────────────────────────
 const API = {
   user: null,
