@@ -951,22 +951,7 @@ app.get('/api/reportes/resumen', auth, async (req, res) => {
 // RUTA POWER BI / BI GERENCIAL
 // ============================================================
 app.get('/api/bi/kpis', async (req, res) => {
-  // Compatibilidad BI empresarial:
-  // - Power BI Web.Contents con encabezado: x-api-key
-  // - Integraciones previas: x-bi-token
-  // - Authorization: Bearer <token>
-  // - Authorization: <token>
-  // - Query string opcional: ?api_key=<token> o ?token=<token>
-  const authHeader = req.get('authorization') || '';
-  const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
-    ? authHeader.slice(7).trim()
-    : authHeader.trim();
-  const token = req.get('x-api-key')
-    || req.get('x-bi-token')
-    || bearerToken
-    || req.query.api_key
-    || req.query.token;
-
+  const token = req.get('x-bi-token') || req.query.token;
   if (!process.env.BI_API_TOKEN || token !== process.env.BI_API_TOKEN) {
     return res.status(401).json({ error: 'Token BI inválido' });
   }
