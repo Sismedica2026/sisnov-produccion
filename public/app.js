@@ -1033,3 +1033,108 @@ renderRep = async function() {
       <div style="margin-top:8px;font-size:.76rem;color:var(--muted)">Incluye novedades, criticidades, responsables, concesiones y tiempos promedio de cierre.</div>`;}
   } catch(e) { console.warn('Reportes v2.1 no disponibles:', e.message); }
 };
+
+// ============================================================
+// SISNOV FIX INTERACCIÓN MOUSE / CSP
+// Convierte manejadores inline legacy (onclick/onchange) en eventos
+// delegados desde app.js. Esto permite que los botones funcionen incluso
+// cuando el navegador bloquea event handlers inline por CSP.
+// ============================================================
+(function sisnovMouseCspCompatibility(){
+  if (window.__sisnovMouseCspCompatibilityLoaded) return;
+  window.__sisnovMouseCspCompatibilityLoaded = true;
+
+  function splitArgs(raw) {
+    const args = [];
+    let cur = '';
+    let quote = null;
+    let esc = false;
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (esc) { cur += ch; esc = false; continue; }
+      if (ch === '\\') { esc = true; cur += ch; continue; }
+      if (quote) {
+        cur += ch;
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === "'" || ch === '"') { quote = ch; cur += ch; continue; }
+      if (ch === ',') { args.push(cur.trim()); cur = ''; continue; }
+      cur += ch;
+    }
+    if (cur.trim() || raw.trim()) args.push(cur.trim());
+    return args.filter(a => a.length || raw.trim()==='');
+  }
+
+  function parseValue(v, el) {
+    if (v === '' || v === undefined) return undefined;
+    if (v === 'this') return el;
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    if (v === 'null') return null;
+    if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+    const m = v.match(/^['"]([\s\S]*)['"]$/);
+    if (m) return m[1]
+      .replace(/\\'/g, "'")
+      .replace(/\\"/g, '"')
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r');
+    return v;
+  }
+
+  function runLegacyHandler(code, el) {
+    if (!code || typeof code !== 'string') return false;
+    const parts = code.split(';').map(x => x.trim()).filter(Boolean);
+    let executed = false;
+    for (const part of parts) {
+      const m = part.match(/^([A-Za-z_$][\w$]*)\(([^)]*)\)$/);
+      if (!m) continue;
+      const fnName = m[1];
+      const fn = window[fnName];
+      if (typeof fn !== 'function') continue;
+      const args = m[2].trim() ? splitArgs(m[2]).map(a => parseValue(a, el)) : [];
+      fn.apply(el, args);
+      executed = true;
+    }
+    return executed;
+  }
+
+  document.addEventListener('click', function(e){
+    const el = e.target.closest && e.target.closest('[onclick]');
+    if (!el) return;
+    const code = el.getAttribute('onclick');
+    if (!code) return;
+    const ok = runLegacyHandler(code, el);
+    if (ok) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+    }
+  }, true);
+
+  document.addEventListener('change', function(e){
+    const el = e.target.closest && e.target.closest('[onchange]');
+    if (!el) return;
+    const code = el.getAttribute('onchange');
+    if (!code) return;
+    const ok = runLegacyHandler(code, el);
+    if (ok) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+    }
+  }, true);
+
+  // Limpieza defensiva: si la app está visible, evita que el login oculto bloquee clics.
+  setInterval(function(){
+    const login = document.getElementById('loginScreen');
+    const shell = document.getElementById('appShell');
+    if (login && shell && shell.classList.contains('vis')) {
+      login.style.display = 'none';
+      login.style.pointerEvents = 'none';
+    }
+    const pwd = document.getElementById('pwd-modal');
+    if (pwd && pwd.style.display === 'none') pwd.style.pointerEvents = 'none';
+    if (pwd && pwd.style.display === 'flex') pwd.style.pointerEvents = 'auto';
+  }, 750);
+})();
