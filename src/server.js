@@ -385,7 +385,12 @@ async function ensureMigrations() {
   await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS gestion_detalle TEXT`);
   await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS gestionado_por VARCHAR(50)`);
   await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS cerrado_en TIMESTAMP`);
+  await pool.query(`ALTER TABLE catalogo_placas ADD COLUMN IF NOT EXISTS desactivado_en TIMESTAMP`);
+  await pool.query(`ALTER TABLE catalogo_placas ADD COLUMN IF NOT EXISTS desactivado_por VARCHAR(50)`);
+  await pool.query(`ALTER TABLE catalogo_placas ADD COLUMN IF NOT EXISTS motivo_cambio TEXT`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_novedades_estado ON novedades(estado)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_novedades_cierre ON novedades(creado_en, cerrado_en)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalogo_placas_activo ON catalogo_placas(zona, concesion, puesto, activo)`);
 }
 
 
@@ -731,20 +736,63 @@ app.post('/api/catalogos/placas', auth, requireRoles('admin'), async (req, res) 
   const puesto = sanitizeText(req.body.puesto || '', 100).toUpperCase();
   const placa = sanitizeText(req.body.placa || '', 50).toUpperCase();
   if (!validEnum(zona, ['NORTE','SUR']) || !concesion || !puesto || !placa) return res.status(400).json({ error: 'Zona, concesión, puesto y placa requeridos' });
-  await pool.query(`INSERT INTO catalogo_concesiones (zona, concesion, creado_por) VALUES ($1,$2,$3) ON CONFLICT (zona, concesion) DO UPDATE SET activo=true`, [zona, concesion, req.user.username]);
-  await pool.query(`INSERT INTO catalogo_puestos (zona, concesion, puesto, creado_por) VALUES ($1,$2,$3,$4) ON CONFLICT (zona, concesion, puesto) DO UPDATE SET activo=true`, [zona, concesion, puesto, req.user.username]);
-  await pool.query(`INSERT INTO catalogo_placas (zona, concesion, puesto, placa, creado_por) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (zona, concesion, puesto, placa) DO UPDATE SET activo=true`, [zona, concesion, puesto, placa, req.user.username]);
-  await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Agregó placa ${placa} en ${concesion}/${puesto}`, req.ip);
-  res.json({ ok: true });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`INSERT INTO catalogo_concesiones (zona, concesion, creado_por) VALUES ($1,$2,$3) ON CONFLICT (zona, concesion) DO UPDATE SET activo=true`, [zona, concesion, req.user.username]);
+    await client.query(`INSERT INTO catalogo_puestos (zona, concesion, puesto, creado_por) VALUES ($1,$2,$3,$4) ON CONFLICT (zona, concesion, puesto) DO UPDATE SET activo=true`, [zona, concesion, puesto, req.user.username]);
+
+    // Regla empresarial: por puesto debe existir una sola placa ACTIVA.
+    // Las anteriores se conservan como histórico inactivo.
+    await client.query(`
+      UPDATE catalogo_placas
+      SET activo=false, desactivado_en=NOW(), desactivado_por=$5, motivo_cambio='REEMPLAZO_PLACA'
+      WHERE zona=$1 AND concesion=$2 AND puesto=$3 AND activo=true AND placa <> $4
+    `, [zona, concesion, puesto, placa, req.user.username]);
+
+    await client.query(`
+      INSERT INTO catalogo_placas (zona, concesion, puesto, placa, activo, creado_por)
+      VALUES ($1,$2,$3,$4,true,$5)
+      ON CONFLICT (zona, concesion, puesto, placa)
+      DO UPDATE SET activo=true, desactivado_en=NULL, desactivado_por=NULL, motivo_cambio=NULL
+    `, [zona, concesion, puesto, placa, req.user.username]);
+
+    await client.query('COMMIT');
+    await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Actualizó placa activa ${placa} en ${concesion}/${puesto}. Histórico conservado.`, req.ip);
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('Add placa error:', e);
+    res.status(500).json({ error: 'Error al actualizar placa' });
+  } finally {
+    client.release();
+  }
 });
 app.delete('/api/catalogos/placas/:zona/:concesion/:puesto/:placa', auth, requireRoles('admin'), async (req, res) => {
   const zona = sanitizeText(req.params.zona || '', 10).toUpperCase();
   const concesion = sanitizeText(decodeURIComponent(req.params.concesion || ''), 100);
   const puesto = sanitizeText(decodeURIComponent(req.params.puesto || ''), 100);
   const placa = sanitizeText(decodeURIComponent(req.params.placa || ''), 50);
-  await pool.query(`UPDATE catalogo_placas SET activo=false WHERE zona=$1 AND concesion=$2 AND puesto=$3 AND placa=$4`, [zona, concesion, puesto, placa]);
+  await pool.query(`UPDATE catalogo_placas SET activo=false, desactivado_en=NOW(), desactivado_por=$5, motivo_cambio='ELIMINACION_ADMIN' WHERE zona=$1 AND concesion=$2 AND puesto=$3 AND placa=$4`, [zona, concesion, puesto, placa, req.user.username]);
   await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Eliminó placa ${placa} en ${concesion}/${puesto}`, req.ip);
   res.json({ ok: true });
+});
+
+app.get('/api/catalogos/placas/historial', auth, requireRoles('admin','gerente'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT zona, concesion, puesto, placa, activo, creado_por, desactivado_por, motivo_cambio,
+             TO_CHAR(creado_en AT TIME ZONE 'America/Bogota','DD/MM/YYYY HH24:MI:SS') AS creado_en_formato,
+             TO_CHAR(desactivado_en AT TIME ZONE 'America/Bogota','DD/MM/YYYY HH24:MI:SS') AS desactivado_en_formato
+      FROM catalogo_placas
+      ORDER BY zona, concesion, puesto, activo DESC, creado_en DESC
+    `);
+    res.json({ placas: result.rows });
+  } catch (e) {
+    console.error('Historial placas error:', e);
+    res.status(500).json({ error: 'Error al obtener historial de placas' });
+  }
 });
 
 // ============================================================
@@ -858,13 +906,29 @@ app.get('/api/reportes/resumen', auth, async (req, res) => {
     if (rol === 'director-norte' || rol === 'coordinador-norte') zFilter = "AND zona='NORTE'";
     else if (rol === 'director-sur' || rol === 'coordinador-sur') zFilter = "AND zona='SUR'";
 
-    const [totales, porArea, porNivel, porEstado, porZona, porCon] = await Promise.all([
+    const [totales, porArea, porNivel, porEstado, porZona, porCon, porCriticidadDetalle, tiemposCierre] = await Promise.all([
       pool.query(`SELECT COUNT(*) as total, zona FROM novedades WHERE 1=1 ${zFilter} GROUP BY zona`),
       pool.query(`SELECT area, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY area ORDER BY total DESC`),
       pool.query(`SELECT nivel, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY nivel`),
       pool.query(`SELECT estado, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY estado`),
       pool.query(`SELECT zona, COUNT(*) as total FROM novedades GROUP BY zona`),
-      pool.query(`SELECT concesion, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY concesion ORDER BY total DESC LIMIT 10`)
+      pool.query(`SELECT concesion, COUNT(*) as total FROM novedades WHERE 1=1 ${zFilter} GROUP BY concesion ORDER BY total DESC LIMIT 10`),
+      pool.query(`
+        SELECT nivel, area, tipo_novedad, estado, COUNT(*)::int AS total
+        FROM novedades
+        WHERE 1=1 ${zFilter}
+        GROUP BY nivel, area, tipo_novedad, estado
+        ORDER BY CASE nivel WHEN 'CRITICA' THEN 1 WHEN 'MEDIA' THEN 2 ELSE 3 END, total DESC
+        LIMIT 30
+      `),
+      pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas,
+          ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en - creado_en))/3600) FILTER (WHERE estado='CERRADA' AND cerrado_en IS NOT NULL), 2) AS horas_promedio_cierre,
+          ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - creado_en))/3600) FILTER (WHERE estado <> 'CERRADA'), 2) AS horas_promedio_abiertas
+        FROM novedades
+        WHERE 1=1 ${zFilter}
+      `)
     ]);
 
     res.json({
@@ -873,10 +937,52 @@ app.get('/api/reportes/resumen', auth, async (req, res) => {
       porNivel: porNivel.rows,
       porEstado: porEstado.rows,
       porZona: porZona.rows,
-      porConcesion: porCon.rows
+      porConcesion: porCon.rows,
+      porCriticidadDetalle: porCriticidadDetalle.rows,
+      tiemposCierre: tiemposCierre.rows[0] || {}
     });
   } catch {
     res.status(500).json({ error: 'Error al obtener reportes' });
+  }
+});
+
+
+// ============================================================
+// RUTA POWER BI / BI GERENCIAL
+// ============================================================
+app.get('/api/bi/kpis', async (req, res) => {
+  const token = req.get('x-bi-token') || req.query.token;
+  if (!process.env.BI_API_TOKEN || token !== process.env.BI_API_TOKEN) {
+    return res.status(401).json({ error: 'Token BI inválido' });
+  }
+  try {
+    const [base, criticidades, responsables, concesiones, cierres] = await Promise.all([
+      pool.query(`
+        SELECT id, zona, concesion, puesto, movil, area, tipo_novedad, nivel, estado,
+               registrado_por, nombre_supervisor,
+               creado_en,
+               cerrado_en,
+               ROUND(EXTRACT(EPOCH FROM (COALESCE(cerrado_en, NOW()) - creado_en))/3600, 2) AS horas_transcurridas,
+               CASE WHEN estado='CERRADA' THEN ROUND(EXTRACT(EPOCH FROM (cerrado_en - creado_en))/3600, 2) END AS horas_cierre
+        FROM novedades
+        ORDER BY creado_en DESC
+      `),
+      pool.query(`SELECT nivel, area, tipo_novedad, estado, COUNT(*)::int AS total FROM novedades GROUP BY nivel, area, tipo_novedad, estado ORDER BY total DESC`),
+      pool.query(`SELECT registrado_por, nombre_supervisor, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre FROM novedades GROUP BY registrado_por, nombre_supervisor ORDER BY total DESC`),
+      pool.query(`SELECT zona, concesion, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE nivel='CRITICA')::int AS criticas, COUNT(*) FILTER (WHERE estado<>'CERRADA')::int AS abiertas FROM novedades GROUP BY zona, concesion ORDER BY total DESC`),
+      pool.query(`SELECT DATE_TRUNC('day', creado_en)::date AS fecha, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre FROM novedades GROUP BY DATE_TRUNC('day', creado_en)::date ORDER BY fecha DESC`)
+    ]);
+    res.json({
+      generado_en: new Date().toISOString(),
+      novedades: base.rows,
+      criticidades: criticidades.rows,
+      responsables: responsables.rows,
+      concesiones: concesiones.rows,
+      cierres_diarios: cierres.rows
+    });
+  } catch (e) {
+    console.error('BI KPIs error:', e);
+    res.status(500).json({ error: 'Error al generar KPIs BI' });
   }
 });
 
