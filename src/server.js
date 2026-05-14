@@ -605,23 +605,65 @@ app.patch('/api/novedades/:id/estado', auth, async (req, res) => {
   const id = Number(req.params.id);
   const estado = sanitizeText(req.body.estado || '', 20).toUpperCase();
   const detalle = sanitizeText(req.body.detalle || '', 500);
-  if (!id || !validEnum(estado, ['ABIERTA','GESTION','CERRADA'])) return res.status(400).json({ error: 'Estado inválido' });
+
+  if (!id || !validEnum(estado, ['ABIERTA','GESTION','CERRADA'])) {
+    return res.status(400).json({ error: 'Estado inválido' });
+  }
+
   try {
+    // Blindaje: garantiza columnas requeridas incluso si el servicio fue actualizado
+    // antes de completar migraciones en una base existente.
+    await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA' CHECK (estado IN ('ABIERTA','GESTION','CERRADA'))`);
+    await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS gestion_detalle TEXT`);
+    await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS gestionado_por VARCHAR(50)`);
+    await pool.query(`ALTER TABLE novedades ADD COLUMN IF NOT EXISTS cerrado_en TIMESTAMP`);
+
     const current = await pool.query('SELECT * FROM novedades WHERE id=$1', [id]);
     const novedad = current.rows[0];
     if (!novedad) return res.status(404).json({ error: 'Novedad no encontrada' });
-    if (req.user.rol === 'supervisor' && novedad.registrado_por !== req.user.username) return res.status(403).json({ error: 'Sin permisos para esta novedad' });
-    if (['director-norte','coordinador-norte'].includes(req.user.rol) && novedad.zona !== 'NORTE') return res.status(403).json({ error: 'Sin permisos para esta zona' });
-    if (['director-sur','coordinador-sur'].includes(req.user.rol) && novedad.zona !== 'SUR') return res.status(403).json({ error: 'Sin permisos para esta zona' });
+
+    // Permisos operativos para cambio de estado:
+    // - Admin/Gerente: global
+    // - Director/Coordinador: por zona
+    // - Supervisor: novedades registradas por él o asignadas a una concesión propia
+    if (['director-norte','coordinador-norte'].includes(req.user.rol) && novedad.zona !== 'NORTE') {
+      return res.status(403).json({ error: 'Sin permisos para esta zona' });
+    }
+    if (['director-sur','coordinador-sur'].includes(req.user.rol) && novedad.zona !== 'SUR') {
+      return res.status(403).json({ error: 'Sin permisos para esta zona' });
+    }
+    if (req.user.rol === 'supervisor') {
+      const assigned = await pool.query(
+        'SELECT 1 FROM asignaciones WHERE username=$1 AND UPPER(TRIM(concesion))=UPPER(TRIM($2)) LIMIT 1',
+        [req.user.username, novedad.concesion || '']
+      );
+      const ownRecord = novedad.registrado_por === req.user.username;
+      const ownName = (novedad.nombre_supervisor || '').trim().toUpperCase() === (req.user.nombre || '').trim().toUpperCase();
+      if (!ownRecord && !ownName && assigned.rowCount === 0) {
+        return res.status(403).json({ error: 'Sin permisos para esta novedad' });
+      }
+    }
+
     const result = await pool.query(
-      `UPDATE novedades SET estado=$1, gestion_detalle=$2, gestionado_por=$3, cerrado_en=CASE WHEN $1='CERRADA' THEN NOW() ELSE cerrado_en END WHERE id=$4 RETURNING *`,
-      [estado, detalle || null, req.user.username, id]
+      `UPDATE novedades
+          SET estado=$1,
+              gestion_detalle=COALESCE(NULLIF($2,''), gestion_detalle),
+              gestionado_por=$3,
+              cerrado_en=CASE
+                WHEN $1='CERRADA' THEN COALESCE(cerrado_en, NOW())
+                WHEN $1 IN ('ABIERTA','GESTION') THEN NULL
+                ELSE cerrado_en
+              END
+        WHERE id=$4
+        RETURNING *`,
+      [estado, detalle || '', req.user.username, id]
     );
+
     await logAudit(req.user.username, req.user.rol, 'ESTADO_NOVEDAD', `Novedad #${id} cambió a ${estado}`, req.ip);
     res.json({ novedad: result.rows[0] });
   } catch (e) {
     console.error('Estado novedad error:', e);
-    res.status(500).json({ error: 'Error al actualizar estado' });
+    res.status(500).json({ error: 'Error al actualizar estado', detail: process.env.NODE_ENV === 'production' ? undefined : e.message });
   }
 });
 
@@ -973,41 +1015,19 @@ app.get('/api/bi/kpis', async (req, res) => {
   try {
     const [base, criticidades, responsables, concesiones, cierres] = await Promise.all([
       pool.query(`
-        SELECT
-          id,
-          TO_CHAR(creado_en AT TIME ZONE 'America/Bogota', 'DD/MM/YYYY HH24:MI:SS') AS fecha_hora,
-          creado_en AS fecha_creacion,
-          zona,
-          concesion,
-          puesto,
-          movil AS placa,
-          movil,
-          area,
-          tipo_novedad AS tipo,
-          tipo_novedad,
-          nivel AS criticidad,
-          nivel,
-          estado,
-          descripcion AS descripcion_hallazgo,
-          descripcion AS hallazgo_descripcion,
-          registrado_por,
-          nombre_supervisor AS supervisor,
-          nombre_supervisor,
-          gestion_detalle,
-          gestionado_por,
-          cerrado_en AS fecha_cierre,
-          TO_CHAR(cerrado_en AT TIME ZONE 'America/Bogota', 'DD/MM/YYYY HH24:MI:SS') AS fecha_cierre_formato,
-          ROUND(EXTRACT(EPOCH FROM (COALESCE(cerrado_en, NOW()) - creado_en))/3600, 2) AS horas_transcurridas,
-          ROUND(EXTRACT(EPOCH FROM (COALESCE(cerrado_en, NOW()) - creado_en))/86400, 2) AS dias_abierta_cierre,
-          CASE WHEN estado='CERRADA' THEN ROUND(EXTRACT(EPOCH FROM (cerrado_en - creado_en))/3600, 2) END AS horas_cierre,
-          CASE WHEN estado='CERRADA' THEN ROUND(EXTRACT(EPOCH FROM (cerrado_en - creado_en))/86400, 2) END AS dias_cierre
+        SELECT id, zona, concesion, puesto, movil, area, tipo_novedad, nivel, estado,
+               registrado_por, nombre_supervisor,
+               creado_en,
+               cerrado_en,
+               ROUND(EXTRACT(EPOCH FROM (COALESCE(cerrado_en, NOW()) - creado_en))/3600, 2) AS horas_transcurridas,
+               CASE WHEN estado='CERRADA' THEN ROUND(EXTRACT(EPOCH FROM (cerrado_en - creado_en))/3600, 2) END AS horas_cierre
         FROM novedades
         ORDER BY creado_en DESC
       `),
-      pool.query(`SELECT nivel AS criticidad, nivel, area, tipo_novedad AS tipo, tipo_novedad, estado, COUNT(*)::int AS total FROM novedades GROUP BY nivel, area, tipo_novedad, estado ORDER BY total DESC`),
-      pool.query(`SELECT registrado_por, nombre_supervisor AS supervisor, nombre_supervisor, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/86400) FILTER (WHERE estado='CERRADA'),2) AS dias_promedio_cierre FROM novedades GROUP BY registrado_por, nombre_supervisor ORDER BY total DESC`),
+      pool.query(`SELECT nivel, area, tipo_novedad, estado, COUNT(*)::int AS total FROM novedades GROUP BY nivel, area, tipo_novedad, estado ORDER BY total DESC`),
+      pool.query(`SELECT registrado_por, nombre_supervisor, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre FROM novedades GROUP BY registrado_por, nombre_supervisor ORDER BY total DESC`),
       pool.query(`SELECT zona, concesion, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE nivel='CRITICA')::int AS criticas, COUNT(*) FILTER (WHERE estado<>'CERRADA')::int AS abiertas FROM novedades GROUP BY zona, concesion ORDER BY total DESC`),
-      pool.query(`SELECT DATE_TRUNC('day', creado_en)::date AS fecha, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/86400) FILTER (WHERE estado='CERRADA'),2) AS dias_promedio_cierre FROM novedades GROUP BY DATE_TRUNC('day', creado_en)::date ORDER BY fecha DESC`)
+      pool.query(`SELECT DATE_TRUNC('day', creado_en)::date AS fecha, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre FROM novedades GROUP BY DATE_TRUNC('day', creado_en)::date ORDER BY fecha DESC`)
     ]);
     res.json({
       generado_en: new Date().toISOString(),
