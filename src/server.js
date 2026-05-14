@@ -180,20 +180,6 @@ function sanitizeText(value, max = 255) {
   if (typeof value !== 'string') return '';
   return value.trim().replace(/[\u0000-\u001F\u007F]/g, '').slice(0, max);
 }
-
-// Normalización empresarial de datos operativos.
-// Convierte a MAYÚSCULA todo dato operativo antes de guardarlo,
-// sin tocar credenciales, correos, tokens, URLs ni contraseñas.
-function upperText(value, max = 255) {
-  return sanitizeText(value, max).toLocaleUpperCase('es-CO');
-}
-function upperOptional(value, max = 255) {
-  const cleaned = sanitizeText(value || '', max);
-  return cleaned ? cleaned.toLocaleUpperCase('es-CO') : null;
-}
-function upperParam(value, max = 255) {
-  return upperText(decodeURIComponent(value || ''), max);
-}
 function validEnum(value, allowed) {
   return allowed.includes(value);
 }
@@ -532,9 +518,9 @@ app.get('/api/novedades', auth, async (req, res) => {
   try {
     const { rol, username } = req.user;
     const { desde, hasta } = req.query;
-    const area = upperText(req.query.area || '', 30);
-    const nivel = upperText(req.query.nivel || '', 10);
-    const concesion = upperText(req.query.concesion || '', 100);
+    const area = sanitizeText(req.query.area || '', 30);
+    const nivel = sanitizeText(req.query.nivel || '', 10);
+    const concesion = sanitizeText(req.query.concesion || '', 100);
 
     let where = [];
     let params = [];
@@ -567,14 +553,14 @@ app.get('/api/novedades', auth, async (req, res) => {
 });
 
 app.post('/api/novedades', auth, requireRoles('admin','coordinador-norte','coordinador-sur','supervisor'), async (req, res) => {
-  const zona = upperText(req.body.zona || '', 10);
-  const concesion = upperText(req.body.concesion || '', 100);
-  const puesto = upperText(req.body.puesto || '', 100);
-  const movil = upperOptional(req.body.movil || '', 50);
-  const area = upperText(req.body.area || '', 30);
-  const tipo_novedad = upperText(req.body.tipo_novedad || '', 100);
-  const nivel = upperText(req.body.nivel || '', 10);
-  const descripcion = upperText(req.body.descripcion || '', 3000);
+  const zona = sanitizeText(req.body.zona || '', 10).toUpperCase();
+  const concesion = sanitizeText(req.body.concesion || '', 100);
+  const puesto = sanitizeText(req.body.puesto || '', 100);
+  const movil = sanitizeText(req.body.movil || '', 50) || null;
+  const area = sanitizeText(req.body.area || '', 30).toUpperCase();
+  const tipo_novedad = sanitizeText(req.body.tipo_novedad || '', 100).toUpperCase();
+  const nivel = sanitizeText(req.body.nivel || '', 10).toUpperCase();
+  const descripcion = sanitizeText(req.body.descripcion || '', 3000);
 
   if (!zona || !concesion || !puesto || !area || !tipo_novedad || !nivel || !descripcion) {
     return res.status(400).json({ error: 'Todos los campos obligatorios son requeridos' });
@@ -617,8 +603,8 @@ app.post('/api/novedades', auth, requireRoles('admin','coordinador-norte','coord
 
 app.patch('/api/novedades/:id/estado', auth, async (req, res) => {
   const id = Number(req.params.id);
-  const estado = upperText(req.body.estado || '', 20);
-  const detalle = upperText(req.body.detalle || '', 500);
+  const estado = sanitizeText(req.body.estado || '', 20).toUpperCase();
+  const detalle = sanitizeText(req.body.detalle || '', 500);
   if (!id || !validEnum(estado, ['ABIERTA','GESTION','CERRADA'])) return res.status(400).json({ error: 'Estado inválido' });
   try {
     const current = await pool.query('SELECT * FROM novedades WHERE id=$1', [id]);
@@ -709,16 +695,16 @@ app.get('/api/catalogos', auth, async (req, res) => {
 });
 
 app.post('/api/catalogos/concesiones', auth, requireRoles('admin'), async (req, res) => {
-  const zona = upperText(req.body.zona || '', 10);
-  const concesion = upperText(req.body.concesion || '', 100);
+  const zona = sanitizeText(req.body.zona || '', 10).toUpperCase();
+  const concesion = sanitizeText(req.body.concesion || '', 100).toUpperCase();
   if (!validEnum(zona, ['NORTE','SUR']) || !concesion) return res.status(400).json({ error: 'Zona y concesión requeridas' });
   await pool.query(`INSERT INTO catalogo_concesiones (zona, concesion, creado_por) VALUES ($1,$2,$3) ON CONFLICT (zona, concesion) DO UPDATE SET activo=true`, [zona, concesion, req.user.username]);
   await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Agregó concesión ${concesion} (${zona})`, req.ip);
   res.json({ ok: true });
 });
 app.delete('/api/catalogos/concesiones/:zona/:concesion', auth, requireRoles('admin'), async (req, res) => {
-  const zona = upperText(req.params.zona || '', 10);
-  const concesion = upperParam(req.params.concesion || '', 100);
+  const zona = sanitizeText(req.params.zona || '', 10).toUpperCase();
+  const concesion = sanitizeText(decodeURIComponent(req.params.concesion || ''), 100);
   await pool.query(`UPDATE catalogo_concesiones SET activo=false WHERE zona=$1 AND concesion=$2`, [zona, concesion]);
   await pool.query(`UPDATE catalogo_puestos SET activo=false WHERE zona=$1 AND concesion=$2`, [zona, concesion]);
   await pool.query(`UPDATE catalogo_placas SET activo=false WHERE zona=$1 AND concesion=$2`, [zona, concesion]);
@@ -726,9 +712,9 @@ app.delete('/api/catalogos/concesiones/:zona/:concesion', auth, requireRoles('ad
   res.json({ ok: true });
 });
 app.post('/api/catalogos/puestos', auth, requireRoles('admin'), async (req, res) => {
-  const zona = upperText(req.body.zona || '', 10);
-  const concesion = upperText(req.body.concesion || '', 100);
-  const puesto = upperText(req.body.puesto || '', 100);
+  const zona = sanitizeText(req.body.zona || '', 10).toUpperCase();
+  const concesion = sanitizeText(req.body.concesion || '', 100).toUpperCase();
+  const puesto = sanitizeText(req.body.puesto || '', 100).toUpperCase();
   if (!validEnum(zona, ['NORTE','SUR']) || !concesion || !puesto) return res.status(400).json({ error: 'Zona, concesión y puesto requeridos' });
   await pool.query(`INSERT INTO catalogo_concesiones (zona, concesion, creado_por) VALUES ($1,$2,$3) ON CONFLICT (zona, concesion) DO UPDATE SET activo=true`, [zona, concesion, req.user.username]);
   await pool.query(`INSERT INTO catalogo_puestos (zona, concesion, puesto, creado_por) VALUES ($1,$2,$3,$4) ON CONFLICT (zona, concesion, puesto) DO UPDATE SET activo=true`, [zona, concesion, puesto, req.user.username]);
@@ -736,19 +722,19 @@ app.post('/api/catalogos/puestos', auth, requireRoles('admin'), async (req, res)
   res.json({ ok: true });
 });
 app.delete('/api/catalogos/puestos/:zona/:concesion/:puesto', auth, requireRoles('admin'), async (req, res) => {
-  const zona = upperText(req.params.zona || '', 10);
-  const concesion = upperParam(req.params.concesion || '', 100);
-  const puesto = upperParam(req.params.puesto || '', 100);
+  const zona = sanitizeText(req.params.zona || '', 10).toUpperCase();
+  const concesion = sanitizeText(decodeURIComponent(req.params.concesion || ''), 100);
+  const puesto = sanitizeText(decodeURIComponent(req.params.puesto || ''), 100);
   await pool.query(`UPDATE catalogo_puestos SET activo=false WHERE zona=$1 AND concesion=$2 AND puesto=$3`, [zona, concesion, puesto]);
   await pool.query(`UPDATE catalogo_placas SET activo=false WHERE zona=$1 AND concesion=$2 AND puesto=$3`, [zona, concesion, puesto]);
   await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Eliminó puesto ${puesto} en ${concesion}`, req.ip);
   res.json({ ok: true });
 });
 app.post('/api/catalogos/placas', auth, requireRoles('admin'), async (req, res) => {
-  const zona = upperText(req.body.zona || '', 10);
-  const concesion = upperText(req.body.concesion || '', 100);
-  const puesto = upperText(req.body.puesto || '', 100);
-  const placa = upperText(req.body.placa || '', 50);
+  const zona = sanitizeText(req.body.zona || '', 10).toUpperCase();
+  const concesion = sanitizeText(req.body.concesion || '', 100).toUpperCase();
+  const puesto = sanitizeText(req.body.puesto || '', 100).toUpperCase();
+  const placa = sanitizeText(req.body.placa || '', 50).toUpperCase();
   if (!validEnum(zona, ['NORTE','SUR']) || !concesion || !puesto || !placa) return res.status(400).json({ error: 'Zona, concesión, puesto y placa requeridos' });
 
   const client = await pool.connect();
@@ -784,10 +770,10 @@ app.post('/api/catalogos/placas', auth, requireRoles('admin'), async (req, res) 
   }
 });
 app.delete('/api/catalogos/placas/:zona/:concesion/:puesto/:placa', auth, requireRoles('admin'), async (req, res) => {
-  const zona = upperText(req.params.zona || '', 10);
-  const concesion = upperParam(req.params.concesion || '', 100);
-  const puesto = upperParam(req.params.puesto || '', 100);
-  const placa = upperParam(req.params.placa || '', 50);
+  const zona = sanitizeText(req.params.zona || '', 10).toUpperCase();
+  const concesion = sanitizeText(decodeURIComponent(req.params.concesion || ''), 100);
+  const puesto = sanitizeText(decodeURIComponent(req.params.puesto || ''), 100);
+  const placa = sanitizeText(decodeURIComponent(req.params.placa || ''), 50);
   await pool.query(`UPDATE catalogo_placas SET activo=false, desactivado_en=NOW(), desactivado_por=$5, motivo_cambio='ELIMINACION_ADMIN' WHERE zona=$1 AND concesion=$2 AND puesto=$3 AND placa=$4`, [zona, concesion, puesto, placa, req.user.username]);
   await logAudit(req.user.username, req.user.rol, 'CATALOGO', `Eliminó placa ${placa} en ${concesion}/${puesto}`, req.ip);
   res.json({ ok: true });
@@ -831,8 +817,8 @@ app.get('/api/usuarios', auth, requireRoles('admin'), async (req, res) => {
 
 app.patch('/api/usuarios/:username', auth, requireRoles('admin'), async (req, res) => {
   const username = sanitizeText(req.params.username || '', 50).toLowerCase();
-  const nombre = req.body.nombre === undefined ? null : upperText(req.body.nombre, 100);
-  const zona = req.body.zona === undefined || req.body.zona === null || req.body.zona === '' ? null : upperText(req.body.zona, 10);
+  const nombre = req.body.nombre === undefined ? null : sanitizeText(req.body.nombre, 100);
+  const zona = req.body.zona === undefined || req.body.zona === null || req.body.zona === '' ? null : sanitizeText(req.body.zona, 10).toUpperCase();
   const activo = typeof req.body.activo === 'boolean' ? req.body.activo : null;
   if (zona && !validEnum(zona, ['NORTE', 'SUR'])) return res.status(400).json({ error: 'Zona inválida' });
 
@@ -855,7 +841,7 @@ app.patch('/api/usuarios/:username', auth, requireRoles('admin'), async (req, re
 
 app.post('/api/usuarios/:username/concesiones', auth, requireRoles('admin'), async (req, res) => {
   const username = sanitizeText(req.params.username || '', 50).toLowerCase();
-  const concesion = upperText(req.body.concesion || '', 100);
+  const concesion = sanitizeText(req.body.concesion || '', 100);
   if (!concesion) return res.status(400).json({ error: 'Concesión requerida' });
   try {
     await pool.query(
@@ -871,7 +857,7 @@ app.post('/api/usuarios/:username/concesiones', auth, requireRoles('admin'), asy
 
 app.delete('/api/usuarios/:username/concesiones/:concesion', auth, requireRoles('admin'), async (req, res) => {
   const username = sanitizeText(req.params.username || '', 50).toLowerCase();
-  const concesion = upperParam(req.params.concesion || '', 100);
+  const concesion = sanitizeText(decodeURIComponent(req.params.concesion || ''), 100);
   try {
     await pool.query('DELETE FROM asignaciones WHERE username=$1 AND concesion=$2', [username, concesion]);
     await logAudit(req.user.username, req.user.rol, 'ASIGNACION', `Quitó concesión de @${username}`, req.ip);
@@ -965,26 +951,63 @@ app.get('/api/reportes/resumen', auth, async (req, res) => {
 // RUTA POWER BI / BI GERENCIAL
 // ============================================================
 app.get('/api/bi/kpis', async (req, res) => {
-  const token = req.get('x-bi-token') || req.query.token;
+  // Compatibilidad BI empresarial:
+  // - Power BI Web.Contents con encabezado: x-api-key
+  // - Integraciones previas: x-bi-token
+  // - Authorization: Bearer <token>
+  // - Authorization: <token>
+  // - Query string opcional: ?api_key=<token> o ?token=<token>
+  const authHeader = req.get('authorization') || '';
+  const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice(7).trim()
+    : authHeader.trim();
+  const token = req.get('x-api-key')
+    || req.get('x-bi-token')
+    || bearerToken
+    || req.query.api_key
+    || req.query.token;
+
   if (!process.env.BI_API_TOKEN || token !== process.env.BI_API_TOKEN) {
     return res.status(401).json({ error: 'Token BI inválido' });
   }
   try {
     const [base, criticidades, responsables, concesiones, cierres] = await Promise.all([
       pool.query(`
-        SELECT id, zona, concesion, puesto, movil, area, tipo_novedad, nivel, estado,
-               registrado_por, nombre_supervisor,
-               creado_en,
-               cerrado_en,
-               ROUND(EXTRACT(EPOCH FROM (COALESCE(cerrado_en, NOW()) - creado_en))/3600, 2) AS horas_transcurridas,
-               CASE WHEN estado='CERRADA' THEN ROUND(EXTRACT(EPOCH FROM (cerrado_en - creado_en))/3600, 2) END AS horas_cierre
+        SELECT
+          id,
+          TO_CHAR(creado_en AT TIME ZONE 'America/Bogota', 'DD/MM/YYYY HH24:MI:SS') AS fecha_hora,
+          creado_en AS fecha_creacion,
+          zona,
+          concesion,
+          puesto,
+          movil AS placa,
+          movil,
+          area,
+          tipo_novedad AS tipo,
+          tipo_novedad,
+          nivel AS criticidad,
+          nivel,
+          estado,
+          descripcion AS descripcion_hallazgo,
+          descripcion AS hallazgo_descripcion,
+          registrado_por,
+          nombre_supervisor AS supervisor,
+          nombre_supervisor,
+          gestion_detalle,
+          gestionado_por,
+          cerrado_en AS fecha_cierre,
+          TO_CHAR(cerrado_en AT TIME ZONE 'America/Bogota', 'DD/MM/YYYY HH24:MI:SS') AS fecha_cierre_formato,
+          ROUND(EXTRACT(EPOCH FROM (COALESCE(cerrado_en, NOW()) - creado_en))/3600, 2) AS horas_transcurridas,
+          ROUND(EXTRACT(EPOCH FROM (COALESCE(cerrado_en, NOW()) - creado_en))/86400, 2) AS dias_abierta_cierre,
+          CASE WHEN estado='CERRADA' THEN ROUND(EXTRACT(EPOCH FROM (cerrado_en - creado_en))/3600, 2) END AS horas_cierre,
+          CASE WHEN estado='CERRADA' THEN ROUND(EXTRACT(EPOCH FROM (cerrado_en - creado_en))/86400, 2) END AS dias_cierre
         FROM novedades
         ORDER BY creado_en DESC
       `),
-      pool.query(`SELECT nivel, area, tipo_novedad, estado, COUNT(*)::int AS total FROM novedades GROUP BY nivel, area, tipo_novedad, estado ORDER BY total DESC`),
-      pool.query(`SELECT registrado_por, nombre_supervisor, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre FROM novedades GROUP BY registrado_por, nombre_supervisor ORDER BY total DESC`),
+      pool.query(`SELECT nivel AS criticidad, nivel, area, tipo_novedad AS tipo, tipo_novedad, estado, COUNT(*)::int AS total FROM novedades GROUP BY nivel, area, tipo_novedad, estado ORDER BY total DESC`),
+      pool.query(`SELECT registrado_por, nombre_supervisor AS supervisor, nombre_supervisor, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/86400) FILTER (WHERE estado='CERRADA'),2) AS dias_promedio_cierre FROM novedades GROUP BY registrado_por, nombre_supervisor ORDER BY total DESC`),
       pool.query(`SELECT zona, concesion, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE nivel='CRITICA')::int AS criticas, COUNT(*) FILTER (WHERE estado<>'CERRADA')::int AS abiertas FROM novedades GROUP BY zona, concesion ORDER BY total DESC`),
-      pool.query(`SELECT DATE_TRUNC('day', creado_en)::date AS fecha, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre FROM novedades GROUP BY DATE_TRUNC('day', creado_en)::date ORDER BY fecha DESC`)
+      pool.query(`SELECT DATE_TRUNC('day', creado_en)::date AS fecha, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE estado='CERRADA')::int AS cerradas, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/3600) FILTER (WHERE estado='CERRADA'),2) AS horas_promedio_cierre, ROUND(AVG(EXTRACT(EPOCH FROM (cerrado_en-creado_en))/86400) FILTER (WHERE estado='CERRADA'),2) AS dias_promedio_cierre FROM novedades GROUP BY DATE_TRUNC('day', creado_en)::date ORDER BY fecha DESC`)
     ]);
     res.json({
       generado_en: new Date().toISOString(),
