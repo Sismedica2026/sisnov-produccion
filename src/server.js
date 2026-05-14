@@ -646,12 +646,12 @@ app.patch('/api/novedades/:id/estado', auth, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE novedades
-          SET estado=$1,
+          SET estado=$1::VARCHAR,
               gestion_detalle=COALESCE(NULLIF($2,''), gestion_detalle),
               gestionado_por=$3,
               cerrado_en=CASE
-                WHEN $1='CERRADA' THEN COALESCE(cerrado_en, NOW())
-                WHEN $1 IN ('ABIERTA','GESTION') THEN NULL
+                WHEN $1::VARCHAR='CERRADA' THEN COALESCE(cerrado_en, NOW())
+                WHEN $1::VARCHAR IN ('ABIERTA','GESTION') THEN NULL
                 ELSE cerrado_en
               END
         WHERE id=$4
